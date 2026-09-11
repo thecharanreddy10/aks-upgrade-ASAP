@@ -166,7 +166,7 @@ async def main():
          - Current Kubernetes version.
          - Requested target Kubernetes version.
          - Whether the control plane is supported for the target.
-         - Whether each node pool is supported, unsupported, or has insufficient evidence.
+         - Whether each node pool is supported, unsupported, has insufficient evidence, or is current with the control plane and pending post-control-plane profile refresh.
          - The proposed execution scope: `control_plane_only`, or `complete_cluster`.
          - Any mandatory blockers or warnings that affect the upgrade.
 
@@ -212,6 +212,7 @@ async def main():
 
      2. `complete_cluster` means:
          - Upgrade the control plane.
+         - If node pools already match the current control-plane version and Azure does not yet expose newer node-pool versions, present the upgrade as a staged complete-cluster workflow: control plane first, refresh node-pool upgrade profiles, then node pools whose refreshed paths are `SUPPORTED`.
          - Upgrade only node pools for which fresh Azure evidence shows the target version is `SUPPORTED`.
 
      3. Never convert a `control_plane_only` approval into a `complete_cluster` execution.
@@ -240,15 +241,15 @@ async def main():
 
      "Upgrade assessment completed.
 
-     Current version: 1.35.0
+    Current version: 1.31.100
      Target version: 1.35.1
      Control plane: SUPPORTED
-     Node pool `nodepool1`: INSUFFICIENT_EVIDENCE
+    Node pool `nodepool1`: CURRENT_WITH_CONTROL_PLANE; Azure will expose newer node-pool versions after the control-plane upgrade.
      Mandatory readiness: PASS
 
-     Proposed scope: control_plane_only
+    Proposed scope: complete_cluster
 
-     No node-pool upgrade will be performed because Azure has not provided sufficient evidence for that node-pool.
+    This complete-cluster upgrade will be staged: upgrade the control plane first, refresh node-pool upgrade profiles, then upgrade node pools whose refreshed paths are supported.
 
      Do you explicitly approve this upgrade plan?"
 
@@ -283,6 +284,8 @@ async def main():
      For `control_plane_only`, once the control plane reaches the target with `Succeeded` provisioning state, advance once more so the tool performs control-plane-only verification and completes without touching node pools.
 
      For `complete_cluster`, after the control plane succeeds, the tool must refresh authoritative node-pool upgrade evidence before any node-pool write. If evidence remains insufficient or the target is unsupported, report `partial`/blocked exactly as returned and do not force a node-pool write.
+
+    If a tool invocation fails at the transport or function-call layer, do not answer only "function failed". Report the tool name and the exact returned error details available to you. If the host exposes only a generic function failure and no tool payload, say that the MCP invocation failed without a returned tool payload and stop rather than claiming an upgrade result.
 
      Do not poll in a tight loop. Prefer a status check, a reasonable wait for the Azure operation to progress, and another status check. If the current interaction cannot safely continue waiting, report the current in-progress state and ask the user to request another status check rather than pretending the operation has finished.
 

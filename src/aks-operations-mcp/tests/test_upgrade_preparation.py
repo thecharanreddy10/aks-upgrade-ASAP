@@ -71,6 +71,7 @@ def test_discovery_surfaces_control_plane_versions_and_missing_pool_upgrades(mon
         "profile_available": True,
         "upgrades_field_present": False,
         "upgrade_versions": [],
+        "interpretation": "current_with_control_plane",
         "error": None,
     }
 
@@ -88,29 +89,54 @@ def test_target_unavailable_from_control_plane_profile(monkeypatch):
     assert "control-plane" in result["blockers"][0]
 
 
-def test_node_pool_profile_without_upgrades_is_insufficient_evidence(monkeypatch):
+def test_node_pool_profile_without_upgrades_when_current_with_control_plane_is_pending(monkeypatch):
     evidence = {"systempool": {"profile_available": True, "upgrades_field_present": False, "upgrade_versions": [], "error": None}}
     result = _plan(monkeypatch, _upgrades(pool_upgrades={"systempool": []}, pool_evidence=evidence))
-    assert result["status"] == "ready_for_control_plane_only"
-    assert result["upgrade_scope"]["node_pools"][0]["path_status"] == "INSUFFICIENT_EVIDENCE"
-    assert "node_pool_upgrade_profile_insufficient" in result["blocker_categories"]
-    assert all(step["operation"] != "upgrade_node_pool" for step in result["sequence"])
+    assert result["status"] == "ready_for_confirmation"
+    assert result["upgrade_scope"]["node_pools"][0]["path_status"] == "CURRENT_WITH_CONTROL_PLANE"
+    assert result["target_validation"]["node_pool_path_evidence_sufficient"] is True
+    assert result["target_validation"]["node_pool_paths_pending_control_plane"] == ["systempool"]
+    assert "node_pool_upgrade_profile_insufficient" not in result["blocker_categories"]
+    assert result["sequence"] == [
+        {"order": 1, "operation": "upgrade_control_plane", "phase": "phase_2"},
+        {
+            "order": 2,
+            "operation": "upgrade_node_pool",
+            "node_pool_name": "systempool",
+            "phase": "after_control_plane_profile_refresh",
+            "requires_profile_refresh": True,
+        },
+    ]
 
 
-def test_control_plane_only_state_requires_explicit_confirmation(monkeypatch):
+def test_current_with_control_plane_state_requires_complete_cluster_confirmation(monkeypatch):
     evidence = {"systempool": {"profile_available": True, "upgrades_field_present": False, "upgrade_versions": [], "error": None}}
     result = _plan(monkeypatch, _upgrades(pool_upgrades={"systempool": []}, pool_evidence=evidence))
 
     assert result["confirmation"]["required"] is True
     assert result["confirmation"]["status"] == "awaiting_explicit_user_confirmation"
-    assert result["confirmation"]["scope"] == "control_plane_only"
-    assert "re-check node-pool upgrade profiles" in result["confirmation"]["next_action"]
-    assert any("only a control-plane-first step" in warning for warning in result["warnings"])
+    assert result["confirmation"]["scope"] == "complete_cluster"
+    assert any("already match the current control-plane version" in warning for warning in result["warnings"])
+    assert any("complete-cluster upgrade will run as a staged workflow" in warning for warning in result["warnings"])
 
 
 def test_missing_node_pool_profile_operation_is_insufficient_evidence(monkeypatch):
     evidence = {"systempool": {"profile_available": False, "upgrades_field_present": False, "upgrade_versions": [], "error": "profile API unavailable"}}
     result = _plan(monkeypatch, _upgrades(pool_upgrades={"systempool": []}, pool_evidence=evidence))
+    assert result["upgrade_scope"]["node_pools"][0]["path_status"] == "INSUFFICIENT_EVIDENCE"
+
+
+def test_node_pool_profile_without_upgrades_when_behind_control_plane_is_insufficient(monkeypatch):
+    evidence = {"systempool": {"profile_available": True, "upgrades_field_present": False, "upgrade_versions": [], "error": None}}
+    result = _plan(
+        monkeypatch,
+        _upgrades(
+            control_plane=TARGET,
+            pools=[{"name": "systempool", "orchestrator_version": "1.29.3"}],
+            pool_upgrades={"systempool": []},
+            pool_evidence=evidence,
+        ),
+    )
     assert result["upgrade_scope"]["node_pools"][0]["path_status"] == "INSUFFICIENT_EVIDENCE"
 
 
@@ -212,11 +238,12 @@ def test_is_available_true_when_arm_profile_contains_target_despite_insufficient
             pool_evidence=evidence,
         ),
     )
-    assert result["status"] == "ready_for_control_plane_only"
+    assert result["status"] == "ready_for_confirmation"
     assert result["target_validation"]["is_available"] is True  # ← KEY: ARM profile contains target
     assert result["target_validation"]["control_plane_path_supported"] is True
     assert result["target_validation"]["node_pool_paths_supported"] is False
-    assert result["target_validation"]["node_pool_path_evidence_sufficient"] is False
+    assert result["target_validation"]["node_pool_path_evidence_sufficient"] is True
+    assert result["target_validation"]["node_pool_paths_pending_control_plane"] == ["systempool"]
 
 
 def test_is_available_false_when_arm_profile_does_not_contain_target(monkeypatch):

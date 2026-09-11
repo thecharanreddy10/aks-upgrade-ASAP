@@ -60,8 +60,7 @@ def mcp(req: func.HttpRequest) -> func.HttpResponse:
                     "jsonrpc": "2.0",
                     "id": req_id,
                     "error": {"code": -32601, "message": f"Unknown tool: {tool_name}"},
-                },
-                status_code=404,
+                }
             )
 
         try:
@@ -72,8 +71,7 @@ def mcp(req: func.HttpRequest) -> func.HttpResponse:
                     "jsonrpc": "2.0",
                     "id": req_id,
                     "error": {"code": -32602, "message": f"Invalid arguments: {exc}"},
-                },
-                status_code=400,
+                }
             )
         except Exception as exc:  # noqa: BLE001
             return _response(
@@ -81,8 +79,7 @@ def mcp(req: func.HttpRequest) -> func.HttpResponse:
                     "jsonrpc": "2.0",
                     "id": req_id,
                     "error": {"code": -32000, "message": str(exc)},
-                },
-                status_code=500,
+                }
             )
 
         return _response(
@@ -105,8 +102,7 @@ def mcp(req: func.HttpRequest) -> func.HttpResponse:
             "jsonrpc": "2.0",
             "id": req_id,
             "error": {"code": -32601, "message": f"Unsupported method: {method}"},
-        },
-        status_code=400,
+        }
     )
 
 

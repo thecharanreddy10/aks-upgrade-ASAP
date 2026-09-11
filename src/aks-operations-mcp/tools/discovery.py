@@ -144,12 +144,15 @@ def aks_get_available_upgrades(
         profile_available = False
         upgrades_field_present = False
         profile_error = None
+        interpretation = None
         if hasattr(client.agent_pools, "get_upgrade_profile"):
             try:
                 pool_profile = client.agent_pools.get_upgrade_profile(resource_group, cluster_name, pool.name)
                 profile_available = True
                 raw_upgrades = getattr(pool_profile, "upgrades", None)
                 upgrades_field_present = raw_upgrades is not None
+                if raw_upgrades is None and getattr(pool, "orchestrator_version", None) == cluster.kubernetes_version:
+                    interpretation = "current_with_control_plane"
                 upgrades = [
                     {
                         "kubernetes_version": item.kubernetes_version,
@@ -170,6 +173,7 @@ def aks_get_available_upgrades(
             "profile_available": profile_available,
             "upgrades_field_present": upgrades_field_present,
             "upgrade_versions": [item["kubernetes_version"] for item in upgrades],
+            "interpretation": interpretation,
             "error": profile_error,
         }
 

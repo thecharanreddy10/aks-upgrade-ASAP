@@ -551,7 +551,13 @@ def aks_plan_upgrade_preparation(
                     "upgrade_versions": [item.get("kubernetes_version") for item in profile] if isinstance(profile, list) else [],
                     "error": None,
                 }
-            path_status = _node_pool_path_status(evidence, profile, target_kubernetes_version)
+            path_status = _node_pool_path_status(
+                evidence,
+                profile,
+                target_kubernetes_version,
+                pool_current_version=pool.get("orchestrator_version"),
+                control_plane_current_version=control_plane_current,
+            )
             pool_path_evidence.append({
                 "name": name,
                 "current_version": pool.get("orchestrator_version"),
@@ -559,10 +565,12 @@ def aks_plan_upgrade_preparation(
                 "path_status": path_status,
                 "evidence": evidence,
             })
+        pending_control_plane_pools = [item["name"] for item in pool_path_evidence if item["path_status"] == "CURRENT_WITH_CONTROL_PLANE"]
         insufficient_pools = [item["name"] for item in pool_path_evidence if item["path_status"] == "INSUFFICIENT_EVIDENCE"]
         unsupported_pools = [item["name"] for item in pool_path_evidence if item["path_status"] == "UNSUPPORTED"]
         target_validation["node_pool_path_evidence_sufficient"] = not insufficient_pools
-        target_validation["node_pool_paths_supported"] = not insufficient_pools and not unsupported_pools
+        target_validation["node_pool_paths_supported"] = not insufficient_pools and not unsupported_pools and not pending_control_plane_pools
+        target_validation["node_pool_paths_pending_control_plane"] = pending_control_plane_pools
         if insufficient_pools:
             target_validation["errors"].append(
                 "Node-pool upgrade profile evidence is insufficient for node pool(s): "
@@ -615,10 +623,18 @@ def aks_plan_upgrade_preparation(
     blockers = list(readiness["readiness"].get("blockers", []))
     warnings = list(readiness["readiness"].get("warnings", []))
     if control_plane_only_candidate:
+        if insufficient_pools:
+            warnings.append(
+                "Node-pool upgrade profile evidence is insufficient. The control-plane target is "
+                "supported, so only a control-plane-first step can be proposed. Node-pool eligibility "
+                "must be re-evaluated after the control-plane upgrade."
+            )
+    if pending_control_plane_pools:
         warnings.append(
-            "Node-pool upgrade profile evidence is insufficient. The control-plane target is "
-            "supported, so only a control-plane-first step can be proposed. Node-pool eligibility "
-            "must be re-evaluated after the control-plane upgrade."
+            "Node pool(s) already match the current control-plane version: "
+            + ", ".join(str(name) for name in pending_control_plane_pools)
+            + ". The complete-cluster upgrade will run as a staged workflow: upgrade the control plane, "
+            "refresh Azure node-pool upgrade profiles, then upgrade node pools whose refreshed paths are supported."
         )
     if blockers:
         status = "blocked"
@@ -639,9 +655,25 @@ def _profile_offers_target(profile: list[dict[str, Any]], target: str) -> bool:
     return any(item.get("kubernetes_version") == target for item in profile)
 
 
-def _node_pool_path_status(evidence: dict[str, Any], profile: Any, target: str) -> str:
+def _node_pool_path_status(
+    evidence: dict[str, Any],
+    profile: Any,
+    target: str,
+    *,
+    pool_current_version: str | None = None,
+    control_plane_current_version: str | None = None,
+) -> str:
     """Classify a pool path without treating absent Azure data as a rejection."""
     if not evidence.get("profile_available") or not evidence.get("upgrades_field_present"):
+        if (
+            evidence.get("profile_available")
+            and not evidence.get("upgrades_field_present")
+            and pool_current_version
+            and control_plane_current_version
+            and pool_current_version == control_plane_current_version
+            and pool_current_version != target
+        ):
+            return "CURRENT_WITH_CONTROL_PLANE"
         return "INSUFFICIENT_EVIDENCE"
     if not isinstance(profile, list):
         return "INSUFFICIENT_EVIDENCE"
@@ -653,6 +685,15 @@ def _upgrade_sequence(scope: dict[str, Any]) -> list[dict[str, Any]]:
     if scope["control_plane"]["included"]:
         sequence.append({"order": 1, "operation": "upgrade_control_plane", "phase": "phase_2"})
     for pool in scope["node_pools"]:
+        if pool["path_status"] == "CURRENT_WITH_CONTROL_PLANE":
+            sequence.append({
+                "order": len(sequence) + 1,
+                "operation": "upgrade_node_pool",
+                "node_pool_name": pool["name"],
+                "phase": "after_control_plane_profile_refresh",
+                "requires_profile_refresh": True,
+            })
+            continue
         if pool["path_status"] != "SUPPORTED":
             continue
         sequence.append({
