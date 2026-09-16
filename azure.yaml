@@ -13,7 +13,7 @@ services:
             - ai-project
         env:
             AZURE_AI_MODEL_DEPLOYMENT_NAME: ${AZURE_AI_MODEL_DEPLOYMENT_NAME}
-            TOOLBOX_ENDPOINT: https://cog-vtjc46vefyyj6.services.ai.azure.com/api/projects/agent-framework-agent-with-found/toolboxes/aks-agent-tools-v2/versions/1/mcp?api-version=v1
+            TOOLBOX_ENDPOINT: https://cog-vtjc46vefyyj6.services.ai.azure.com/api/projects/agent-framework-agent-with-found/toolboxes/aks-agent-tools-v19/versions/1/mcp?api-version=v1
         codeConfiguration:
             dependencyResolution: remote_build
             entryPoint: main.py

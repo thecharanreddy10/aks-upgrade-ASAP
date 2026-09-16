@@ -118,6 +118,201 @@ def test_operator_health_not_configured_without_selector():
     assert result["status"] == "NOT_CONFIGURED"
 
 
+def test_post_upgrade_smoke_checks_pass_after_complete_cluster_upgrade(monkeypatch):
+    monkeypatch.setattr(
+        upgrade,
+        "aks_get_upgrade_execution_status",
+        lambda *_a: {
+            "cluster": {
+                "kubernetes_version": "1.30.1",
+                "current_kubernetes_version": "1.30.1",
+                "provisioning_state": "Succeeded",
+            },
+            "node_pools": [
+                {
+                    "name": "userpool",
+                    "orchestrator_version": "1.30.1",
+                    "current_orchestrator_version": "1.30.1",
+                    "provisioning_state": "Succeeded",
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        upgrade,
+        "aks_validate_upgrade_readiness",
+        lambda *_a, **_k: {"readiness": {"is_ready": True, "blockers": [], "warnings": []}},
+    )
+
+    result = upgrade.aks_run_post_upgrade_smoke_checks(*CLUSTER_ARGS, "1.30.1")
+
+    assert result["status"] == "PASS"
+    assert [item["status"] for item in result["version_checks"]] == ["PASS", "PASS"]
+
+
+def test_post_upgrade_smoke_checks_block_on_node_pool_version_mismatch(monkeypatch):
+    monkeypatch.setattr(
+        upgrade,
+        "aks_get_upgrade_execution_status",
+        lambda *_a: {
+            "cluster": {
+                "kubernetes_version": "1.30.1",
+                "current_kubernetes_version": "1.30.1",
+                "provisioning_state": "Succeeded",
+            },
+            "node_pools": [
+                {
+                    "name": "userpool",
+                    "orchestrator_version": "1.29.3",
+                    "current_orchestrator_version": "1.29.3",
+                    "provisioning_state": "Succeeded",
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        upgrade,
+        "aks_validate_upgrade_readiness",
+        lambda *_a, **_k: {"readiness": {"is_ready": True, "blockers": [], "warnings": []}},
+    )
+
+    result = upgrade.aks_run_post_upgrade_smoke_checks(
+        *CLUSTER_ARGS,
+        "1.30.1",
+        stage="node_pool",
+        node_pool_name="userpool",
+    )
+
+    assert result["status"] == "BLOCKED"
+    assert result["version_checks"][0]["status"] == "BLOCKED"
+    assert "node_pool 'userpool'" in result["blockers"][0]
+
+
+def test_collect_pre_upgrade_inventory_reports_cluster_and_kubectl_facts(monkeypatch):
+    monkeypatch.setattr(
+        upgrade,
+        "aks_get_cluster_details",
+        lambda *_a, **_k: {"kubernetes_version": "1.31.100", "provisioning_state": "Succeeded"},
+    )
+    monkeypatch.setattr(
+        upgrade,
+        "aks_get_node_pools",
+        lambda *_a, **_k: {"node_pools": [{"name": "userpool", "orchestrator_version": "1.31.100"}]},
+    )
+
+    def fake_run_kubectl_batch(*_args, **_kwargs):
+        return {
+            "kube_version": (0, '{"clientVersion":{"gitVersion":"v1.31.2"}}'),
+            "nodes": (0, '{"items":[{"metadata":{"name":"node-1"},"status":{"conditions":[{"type":"Ready","status":"True"}]} }]}'),
+            "pods": (0, '{"items":[{"metadata":{"name":"api","namespace":"default"},"status":{"phase":"Running"} }]}'),
+            "pvcs": (0, '{"items":[] }'),
+            "pvs": (0, '{"items":[] }'),
+            "crds": (0, '{"items":[{"metadata":{"name":"widgets.example.com"}}]}'),
+        }
+
+    monkeypatch.setattr(upgrade, "run_kubectl_batch", fake_run_kubectl_batch)
+    monkeypatch.setattr(upgrade, "run_kubectl_raw", lambda *_a, **_k: "NAME\tNAMESPACE\nteam-a\tdefault\n")
+    monkeypatch.setattr(
+        upgrade,
+        "aks_check_storage",
+        lambda *_a, **_k: {
+            "storage_health": "HEALTHY",
+            "blockers": [],
+            "warnings": [],
+            "query_errors": [],
+            "recommendations": ["No storage issues detected."],
+        },
+    )
+
+    result = upgrade.aks_collect_pre_upgrade_inventory(*CLUSTER_ARGS)
+
+    assert result["status"] == "PASS"
+    assert result["inventory"]["cluster"]["kubernetes_version"] == "1.31.100"
+    assert result["inventory"]["kubectl_version"]["client_version"] == "v1.31.2"
+    assert result["inventory"]["nodes"]["total_nodes"] == 1
+    assert result["inventory"]["pods"]["total_pods"] == 1
+    assert result["inventory"]["helm"]["status"] == "REPORT"
+    assert result["inventory"]["nodes"]["items"][0]["name"] == "node-1"
+    assert result["inventory"]["pods"]["unhealthy"] == []
+    assert "status" not in result["inventory"]["pods"]["unhealthy"]
+    assert result["inventory"]["crds"]["items"][0]["name"] == "widgets.example.com"
+
+
+def test_collect_pre_upgrade_inventory_marks_helm_query_failure(monkeypatch):
+    monkeypatch.setattr(
+        upgrade,
+        "aks_get_cluster_details",
+        lambda *_a, **_k: {"kubernetes_version": "1.31.100", "provisioning_state": "Succeeded"},
+    )
+    monkeypatch.setattr(
+        upgrade,
+        "aks_get_node_pools",
+        lambda *_a, **_k: {"node_pools": [{"name": "userpool", "orchestrator_version": "1.31.100"}]},
+    )
+
+    def fake_run_kubectl_batch(*_args, **_kwargs):
+        return {
+            "kube_version": (0, '{"clientVersion":{"gitVersion":"v1.31.2"}}'),
+            "nodes": (0, '{"items":[]}'),
+            "pods": (0, '{"items":[]}'),
+            "pvcs": (0, '{"items":[]}'),
+            "pvs": (0, '{"items":[]}'),
+            "crds": (0, '{"items":[]}'),
+        }
+
+    monkeypatch.setattr(upgrade, "run_kubectl_batch", fake_run_kubectl_batch)
+    monkeypatch.setattr(upgrade, "run_kubectl_raw", lambda *_a, **_k: "helm: command not found")
+
+    result = upgrade.aks_collect_pre_upgrade_inventory(*CLUSTER_ARGS)
+
+    assert result["status"] == "WARN"
+    assert result["inventory"]["helm"]["status"] == "UNAVAILABLE"
+    assert "helm" in " ".join(result["warnings"]).lower()
+
+
+def test_collect_pre_upgrade_inventory_reports_storage_validation(monkeypatch):
+    monkeypatch.setattr(
+        upgrade,
+        "aks_get_cluster_details",
+        lambda *_a, **_k: {"kubernetes_version": "1.31.100", "provisioning_state": "Succeeded"},
+    )
+    monkeypatch.setattr(
+        upgrade,
+        "aks_get_node_pools",
+        lambda *_a, **_k: {"node_pools": [{"name": "userpool", "orchestrator_version": "1.31.100"}]},
+    )
+
+    def fake_run_kubectl_batch(*_args, **_kwargs):
+        return {
+            "kube_version": (0, '{"clientVersion":{"gitVersion":"v1.31.2"}}'),
+            "nodes": (0, '{"items":[]}'),
+            "pods": (0, '{"items":[]}'),
+            "pvcs": (0, '{"items":[]}'),
+            "pvs": (0, '{"items":[]}'),
+            "crds": (0, '{"items":[]}'),
+        }
+
+    monkeypatch.setattr(upgrade, "run_kubectl_batch", fake_run_kubectl_batch)
+    monkeypatch.setattr(upgrade, "run_kubectl_raw", lambda *_a, **_k: "NAME\tNAMESPACE\nteam-a\tdefault\n")
+    monkeypatch.setattr(
+        upgrade,
+        "aks_check_storage",
+        lambda *_a, **_k: {
+            "storage_health": "WARNING",
+            "blockers": [],
+            "warnings": ["PVC default/cache is Pending"],
+            "query_errors": [],
+            "recommendations": ["Monitor PVC state"],
+        },
+    )
+
+    result = upgrade.aks_collect_pre_upgrade_inventory(*CLUSTER_ARGS)
+
+    assert result["status"] == "WARN"
+    assert result["inventory"]["storage_validation"]["storage_health"] == "WARNING"
+    assert "pvc default/cache" in " ".join(result["warnings"]).lower()
+
+
 def test_operator_health_blocks_unhealthy_operator(monkeypatch):
     batch = {
         "deployments": (
@@ -141,6 +336,14 @@ def test_operator_health_blocks_unhealthy_operator(monkeypatch):
     assert result["status"] == "BLOCKED"
     assert result["unhealthy_operators"][0]["available_replicas"] == 1
     assert result["operators"][0]["current_version"] == "1.2.3"
+    assert result["summary"] == {
+        "status": "BLOCKED",
+        "operators_checked": 1,
+        "healthy_operators": 0,
+        "unhealthy_operators": 1,
+        "version_mismatches": 0,
+        "query_errors": 0,
+    }
 
 
 def test_operator_health_passes_healthy_operator_and_matches_target(monkeypatch):
@@ -166,6 +369,55 @@ def test_operator_health_passes_healthy_operator_and_matches_target(monkeypatch)
 
     assert result["status"] == "PASS"
     assert result["version_mismatches"] == []
+
+
+def test_service_ingress_url_check_reports_service_ingress_and_http_success(monkeypatch):
+    monkeypatch.setattr(
+        validation,
+        "run_kubectl_batch",
+        lambda *_a, **_k: {
+            "services": (
+                0,
+                '{"items":[{"metadata":{"namespace":"default","name":"web"},'
+                '"spec":{"type":"LoadBalancer","clusterIP":"10.0.0.8",'
+                '"ports":[{"port":80}]},"status":{"loadBalancer":{"ingress":[{"ip":"203.0.113.10"}]}}}]}',
+            ),
+            "ingresses": (
+                0,
+                '{"items":[{"metadata":{"namespace":"default","name":"web-ingress"},'
+                '"spec":{"rules":[{"host":"app.example.com"}]},'
+                '"status":{"loadBalancer":{"ingress":[{"hostname":"app.example.com"}]}}}]}',
+            ),
+        },
+    )
+    monkeypatch.setattr(validation, "run_kubectl_raw", lambda *_a, **_k: "200")
+
+    result = validation.aks_check_service_ingress_urls(
+        *CLUSTER_ARGS,
+        namespace="default",
+        service_name="web",
+        ingress_name="web-ingress",
+        url="https://app.example.com/health",
+    )
+
+    assert result["status"] == "PASS"
+    assert result["services"][0]["external_endpoints"] == ["203.0.113.10"]
+    assert result["ingresses"][0]["hosts"] == ["app.example.com"]
+    assert result["url_probe"]["http_status"] == 200
+
+
+def test_service_ingress_url_check_rejects_unsafe_url(monkeypatch):
+    def unexpected_call(*_args, **_kwargs):
+        raise AssertionError("Cluster commands must not run for an invalid URL.")
+
+    monkeypatch.setattr(validation, "run_kubectl_batch", unexpected_call)
+
+    try:
+        validation.aks_check_service_ingress_urls(*CLUSTER_ARGS, url="ftp://example.com/health")
+    except ValueError as exc:
+        assert "absolute http" in str(exc)
+    else:
+        raise AssertionError("Expected invalid URL to be rejected.")
 
 
 def test_node_pool_surge_warns_for_ten_node_pool_below_recommendation(monkeypatch):

@@ -1,0 +1,519 @@
+{
+  "compat": {
+    "status": "PASS",
+    "target_kubernetes_version": "1.36.3",
+    "webhooks": [
+      {
+        "configuration": "aks-node-validating-webhook",
+        "webhook": "aks-node-validating-webhook.azmk8s.io",
+        "service": null,
+        "namespace": null,
+        "url": "https://ccp-webhook.6a8c3ec9a9a627000172c177.svc.cluster.local.:8443/validate-nodes",
+        "has_ca_bundle": true,
+        "failure_policy": "Fail"
+      },
+      {
+        "configuration": "aks-node-mutating-webhook",
+        "webhook": "aks-node-mutating-webhook.azmk8s.io",
+        "service": null,
+        "namespace": null,
+        "url": "https://ccp-webhook.6a8c3ec9a9a627000172c177.svc.cluster.local.:8443/mutate-nodes",
+        "has_ca_bundle": true,
+        "failure_policy": "Fail"
+      },
+      {
+        "configuration": "aks-webhook-admission-controller",
+        "webhook": "aks-webhook-admission-controller.azmk8s.io",
+        "service": null,
+        "namespace": null,
+        "url": "https://ccp-webhook.6a8c3ec9a9a627000172c177.svc.cluster.local.:8443/mutate-pods",
+        "has_ca_bundle": true,
+        "failure_policy": "Fail"
+      }
+    ],
+    "unavailable_api_services": [],
+    "crds": [
+      {
+        "name": "nodeinfo.multitenancy.acn.azure.com",
+        "versions": [
+          "v1alpha1"
+        ],
+        "served_versions": [
+          "v1alpha1"
+        ],
+        "storage_versions": [
+          "v1alpha1"
+        ],
+        "conversion_strategy": "None"
+      },
+      {
+        "name": "nodenetworkconfigs.acn.azure.com",
+        "versions": [
+          "v1alpha"
+        ],
+        "served_versions": [
+          "v1alpha"
+        ],
+        "storage_versions": [
+          "v1alpha"
+        ],
+        "conversion_strategy": "None"
+      },
+      {
+        "name": "overlayextensionconfigs.acn.azure.com",
+        "versions": [
+          "v1alpha1"
+        ],
+        "served_versions": [
+          "v1alpha1"
+        ],
+        "storage_versions": [
+          "v1alpha1"
+        ],
+        "conversion_strategy": "None"
+      },
+      {
+        "name": "volumesnapshotclasses.snapshot.storage.k8s.io",
+        "versions": [
+          "v1",
+          "v1beta1"
+        ],
+        "served_versions": [
+          "v1"
+        ],
+        "storage_versions": [
+          "v1"
+        ],
+        "conversion_strategy": "None"
+      },
+      {
+        "name": "volumesnapshotcontents.snapshot.storage.k8s.io",
+        "versions": [
+          "v1",
+          "v1beta1"
+        ],
+        "served_versions": [
+          "v1"
+        ],
+        "storage_versions": [
+          "v1"
+        ],
+        "conversion_strategy": "None"
+      },
+      {
+        "name": "volumesnapshots.snapshot.storage.k8s.io",
+        "versions": [
+          "v1",
+          "v1beta1"
+        ],
+        "served_versions": [
+          "v1"
+        ],
+        "storage_versions": [
+          "v1"
+        ],
+        "conversion_strategy": "None"
+      }
+    ],
+    "system_workloads": [
+      {
+        "kind": "DaemonSet",
+        "name": "azure-cns",
+        "desired": 2,
+        "ready": 2
+      },
+      {
+        "kind": "DaemonSet",
+        "name": "azure-cns-win",
+        "desired": 0,
+        "ready": 0
+      },
+      {
+        "kind": "DaemonSet",
+        "name": "azure-ip-masq-agent",
+        "desired": 2,
+        "ready": 2
+      },
+      {
+        "kind": "DaemonSet",
+        "name": "cloud-node-manager",
+        "desired": 2,
+        "ready": 2
+      },
+      {
+        "kind": "DaemonSet",
+        "name": "cloud-node-manager-windows",
+        "desired": 0,
+        "ready": 0
+      },
+      {
+        "kind": "DaemonSet",
+        "name": "csi-azuredisk-node",
+        "desired": 2,
+        "ready": 2
+      },
+      {
+        "kind": "DaemonSet",
+        "name": "csi-azuredisk-node-win",
+        "desired": 0,
+        "ready": 0
+      },
+      {
+        "kind": "DaemonSet",
+        "name": "csi-azurefile-node",
+        "desired": 2,
+        "ready": 2
+      },
+      {
+        "kind": "DaemonSet",
+        "name": "csi-azurefile-node-win",
+        "desired": 0,
+        "ready": 0
+      },
+      {
+        "kind": "DaemonSet",
+        "name": "kube-proxy",
+        "desired": 2,
+        "ready": 2
+      },
+      {
+        "kind": "DaemonSet",
+        "name": "windows-kube-proxy-initializer",
+        "desired": 0,
+        "ready": 0
+      },
+      {
+        "kind": "Deployment",
+        "name": "coredns",
+        "desired": 2,
+        "ready": 2
+      },
+      {
+        "kind": "Deployment",
+        "name": "coredns-autoscaler",
+        "desired": 1,
+        "ready": 1
+      },
+      {
+        "kind": "Deployment",
+        "name": "konnectivity-agent",
+        "desired": 2,
+        "ready": 2
+      },
+      {
+        "kind": "Deployment",
+        "name": "konnectivity-agent-autoscaler",
+        "desired": 1,
+        "ready": 1
+      },
+      {
+        "kind": "Deployment",
+        "name": "metrics-server",
+        "desired": 2,
+        "ready": 2
+      }
+    ],
+    "nodes": [
+      {
+        "name": "aks-nodepool1-34194484-vmss000013",
+        "kubelet_version": "v1.36.0",
+        "os_image": "Ubuntu 24.04.4 LTS",
+        "container_runtime": "containerd://2.3.3-2",
+        "ready": true,
+        "conditions": {
+          "FrequentContainerdRestart": "False",
+          "FrequentUnregisterNetDevice": "False",
+          "FrequentDockerRestart": "False",
+          "ContainerRuntimeProblem": "False",
+          "ReadonlyFilesystem": "False",
+          "FrequentKubeletRestart": "False",
+          "FilesystemCorruptionProblem": "False",
+          "KubeletProblem": "False",
+          "VMEventScheduled": "False",
+          "KernelDeadlock": "False",
+          "MemoryPressure": "False",
+          "DiskPressure": "False",
+          "PIDPressure": "False",
+          "Ready": "True"
+        }
+      },
+      {
+        "name": "aks-nodepool1-34194484-vmss000014",
+        "kubelet_version": "v1.36.0",
+        "os_image": "Ubuntu 24.04.4 LTS",
+        "container_runtime": "containerd://2.3.3-2",
+        "ready": true,
+        "conditions": {
+          "VMEventScheduled": "False",
+          "KernelDeadlock": "False",
+          "ReadonlyFilesystem": "False",
+          "FilesystemCorruptionProblem": "False",
+          "FrequentContainerdRestart": "False",
+          "ContainerRuntimeProblem": "False",
+          "FrequentKubeletRestart": "False",
+          "FrequentDockerRestart": "False",
+          "FrequentUnregisterNetDevice": "False",
+          "KubeletProblem": "False",
+          "MemoryPressure": "False",
+          "DiskPressure": "False",
+          "PIDPressure": "False",
+          "Ready": "True"
+        }
+      }
+    ],
+    "query_errors": [],
+    "blockers": [],
+    "warnings": [],
+    "operator_guided_steps": [
+      "Compare CSI, CNI, ingress, kube-proxy, operator, and node image versions with the target-version compatibility matrix.",
+      "For webhook warnings, inspect the owning controller, service endpoints, CA bundle, and certificate expiry before changing admission configuration.",
+      "For CRD warnings, upgrade the CRD and operator together and test conversion of existing custom resources.",
+      "Do not apply a generic write from this diagnostic; use a dedicated remediation or an explicitly authorized operator-guided change."
+    ],
+    "run_command_invocations": 1
+  },
+  "addons": {
+    "status": "PASS",
+    "target_kubernetes_version": null,
+    "csi_drivers": [
+      {
+        "name": "disk.csi.azure.com",
+        "provisioner": null,
+        "attach_required": true,
+        "pod_info_on_mount": false
+      },
+      {
+        "name": "file.csi.azure.com",
+        "provisioner": null,
+        "attach_required": false,
+        "pod_info_on_mount": true
+      }
+    ],
+    "csi_nodes": [
+      "aks-nodepool1-34194484-vmss000013",
+      "aks-nodepool1-34194484-vmss000014"
+    ],
+    "storage_classes": [
+      {
+        "name": "azurefile",
+        "provisioner": "file.csi.azure.com",
+        "reclaim_policy": "Delete",
+        "volume_binding_mode": "Immediate"
+      },
+      {
+        "name": "azurefile-csi",
+        "provisioner": "file.csi.azure.com",
+        "reclaim_policy": "Delete",
+        "volume_binding_mode": "Immediate"
+      },
+      {
+        "name": "azurefile-csi-premium",
+        "provisioner": "file.csi.azure.com",
+        "reclaim_policy": "Delete",
+        "volume_binding_mode": "Immediate"
+      },
+      {
+        "name": "azurefile-premium",
+        "provisioner": "file.csi.azure.com",
+        "reclaim_policy": "Delete",
+        "volume_binding_mode": "Immediate"
+      },
+      {
+        "name": "default",
+        "provisioner": "disk.csi.azure.com",
+        "reclaim_policy": "Delete",
+        "volume_binding_mode": "WaitForFirstConsumer"
+      },
+      {
+        "name": "managed",
+        "provisioner": "disk.csi.azure.com",
+        "reclaim_policy": "Delete",
+        "volume_binding_mode": "WaitForFirstConsumer"
+      },
+      {
+        "name": "managed-csi",
+        "provisioner": "disk.csi.azure.com",
+        "reclaim_policy": "Delete",
+        "volume_binding_mode": "WaitForFirstConsumer"
+      },
+      {
+        "name": "managed-csi-premium",
+        "provisioner": "disk.csi.azure.com",
+        "reclaim_policy": "Delete",
+        "volume_binding_mode": "WaitForFirstConsumer"
+      },
+      {
+        "name": "managed-csi-premium-v2",
+        "provisioner": "disk.csi.azure.com",
+        "reclaim_policy": "Delete",
+        "volume_binding_mode": "WaitForFirstConsumer"
+      },
+      {
+        "name": "managed-premium",
+        "provisioner": "disk.csi.azure.com",
+        "reclaim_policy": "Delete",
+        "volume_binding_mode": "WaitForFirstConsumer"
+      },
+      {
+        "name": "mysql-managed-disk",
+        "provisioner": "disk.csi.azure.com",
+        "reclaim_policy": "Retain",
+        "volume_binding_mode": "WaitForFirstConsumer"
+      }
+    ],
+    "system_workloads": [
+      {
+        "kind": "DaemonSet",
+        "name": "azure-cns",
+        "namespace": "kube-system"
+      },
+      {
+        "kind": "DaemonSet",
+        "name": "azure-cns-win",
+        "namespace": "kube-system"
+      },
+      {
+        "kind": "DaemonSet",
+        "name": "azure-ip-masq-agent",
+        "namespace": "kube-system"
+      },
+      {
+        "kind": "DaemonSet",
+        "name": "cloud-node-manager",
+        "namespace": "kube-system"
+      },
+      {
+        "kind": "DaemonSet",
+        "name": "cloud-node-manager-windows",
+        "namespace": "kube-system"
+      },
+      {
+        "kind": "DaemonSet",
+        "name": "csi-azuredisk-node",
+        "namespace": "kube-system"
+      },
+      {
+        "kind": "DaemonSet",
+        "name": "csi-azuredisk-node-win",
+        "namespace": "kube-system"
+      },
+      {
+        "kind": "DaemonSet",
+        "name": "csi-azurefile-node",
+        "namespace": "kube-system"
+      },
+      {
+        "kind": "DaemonSet",
+        "name": "csi-azurefile-node-win",
+        "namespace": "kube-system"
+      },
+      {
+        "kind": "DaemonSet",
+        "name": "kube-proxy",
+        "namespace": "kube-system"
+      },
+      {
+        "kind": "DaemonSet",
+        "name": "windows-kube-proxy-initializer",
+        "namespace": "kube-system"
+      },
+      {
+        "kind": "Deployment",
+        "name": "coredns",
+        "namespace": "kube-system"
+      },
+      {
+        "kind": "Deployment",
+        "name": "coredns-autoscaler",
+        "namespace": "kube-system"
+      },
+      {
+        "kind": "Deployment",
+        "name": "konnectivity-agent",
+        "namespace": "kube-system"
+      },
+      {
+        "kind": "Deployment",
+        "name": "konnectivity-agent-autoscaler",
+        "namespace": "kube-system"
+      },
+      {
+        "kind": "Deployment",
+        "name": "metrics-server",
+        "namespace": "kube-system"
+      }
+    ],
+    "operator_workloads": [
+      {
+        "kind": "Deployment",
+        "name": "mysql-deploy",
+        "namespace": "phonebook"
+      },
+      {
+        "kind": "Deployment",
+        "name": "resultserver-deploy",
+        "namespace": "phonebook"
+      },
+      {
+        "kind": "Deployment",
+        "name": "webserver-deploy",
+        "namespace": "phonebook"
+      }
+    ],
+    "helm": {
+      "status": "REPORT",
+      "releases": [
+        {
+          "name": "aks-managed-overlay-upgrade-data",
+          "namespace": "kube-system",
+          "revision": "10670",
+          "updated": "2026-09-15 12:21:15.760299064 +0000 UTC",
+          "status": "deployed",
+          "chart": "overlay-upgrade-data-addon-0.1.0-v20260902-addon-260912-1",
+          "app_version": ""
+        },
+        {
+          "name": "phonebook",
+          "namespace": "phonebook",
+          "revision": "2",
+          "updated": "2026-08-25 18:52:24.7139115 +0000 UTC",
+          "status": "deployed",
+          "chart": "phonebook-0.2.0",
+          "app_version": "1.16.0"
+        }
+      ]
+    },
+    "query_errors": [],
+    "blockers": [],
+    "warnings": [],
+    "operator_guided_steps": [
+      "Compare CSI/CNI, ingress, kube-proxy, and system add-on versions with the target Kubernetes compatibility matrix.",
+      "Review Helm chart and operator release notes before upgrading a release; use helm upgrade --dry-run --debug in a safe environment.",
+      "Do not upgrade or replace an add-on from this inventory tool; use a dedicated, explicitly authorized remediation after compatibility is confirmed."
+    ],
+    "run_command_invocations": 2
+  },
+  "rbac": {
+    "status": "WARNING",
+    "scope": {
+      "namespace": "phonebook",
+      "service_account": null
+    },
+    "unavailable_api_services": [],
+    "permission_checks": [],
+    "rolebinding_count": 1,
+    "clusterrolebinding_count": 96,
+    "query_errors": [],
+    "blockers": [],
+    "warnings": [
+      "No service account was supplied; RBAC permission checks were not run."
+    ],
+    "operator_guided_steps": [
+      "Inspect the unavailable APIService backing service, endpoints, TLS, and owning extension server.",
+      "Grant only the minimum Role, RoleBinding, ClusterRole, or ClusterRoleBinding required by the identified subject.",
+      "Verify with kubectl auth can-i and re-run upgrade readiness; do not apply broad cluster-admin permissions as a shortcut."
+    ],
+    "writes_performed": false,
+    "run_command_invocations": 1
+  }
+}

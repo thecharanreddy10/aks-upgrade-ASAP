@@ -1,0 +1,242 @@
+{
+  "subscription_id": "bb0e2c9e-d7fb-45e4-92cf-654f380e6388",
+  "resource_group": "AKS_Upgrade_Agent",
+  "cluster_name": "AKS_oldapp_cluster",
+  "namespace": "all-namespaces",
+  "check_mode": "full",
+  "maintenance_window": {
+    "start_utc": null,
+    "end_utc": null,
+    "in_window": true
+  },
+  "readiness": {
+    "is_ready": true,
+    "blockers": [],
+    "warnings": []
+  },
+  "deep_check_errors": [],
+  "node_health": {
+    "cluster_name": "AKS_oldapp_cluster",
+    "total_nodes": 2,
+    "healthy_nodes": 2,
+    "unhealthy_nodes": []
+  },
+  "pod_health": {
+    "cluster_name": "AKS_oldapp_cluster",
+    "scope": "all-namespaces",
+    "total_pods": 46,
+    "healthy_pods": 44,
+    "unhealthy_pods": [],
+    "infra_artifact_pods": [
+      {
+        "namespace": "aks-command",
+        "name": "command-1a5e92ec6e954142a86f8a1b5a60307e",
+        "phase": "Pending",
+        "restart_count": 0,
+        "waiting_reasons": [
+          "ContainerCreating"
+        ],
+        "scheduled_reason": null,
+        "is_infra_artifact": true
+      },
+      {
+        "namespace": "aks-command",
+        "name": "command-3c2b5830917b439d9af1a2bdb9586679",
+        "phase": "Pending",
+        "restart_count": 0,
+        "waiting_reasons": [
+          "ContainerCreating"
+        ],
+        "scheduled_reason": null,
+        "is_infra_artifact": true
+      }
+    ],
+    "pod_health_status": "HEALTHY",
+    "query_errors": [],
+    "run_command_invocations": 1
+  },
+  "pdb_health": {
+    "cluster_name": "AKS_oldapp_cluster",
+    "scope": "all-namespaces",
+    "total_pdbs": 4,
+    "blocking_pdbs": [],
+    "is_upgrade_safe": true
+  },
+  "storage_health": {
+    "subscription_id": "bb0e2c9e-d7fb-45e4-92cf-654f380e6388",
+    "resource_group": "AKS_Upgrade_Agent",
+    "cluster_name": "AKS_oldapp_cluster",
+    "scope": "all-namespaces",
+    "storage_health": "HEALTHY",
+    "pvcs": {
+      "total": 1,
+      "bound": 1,
+      "pending": 0,
+      "problematic": []
+    },
+    "pvs": {
+      "total": 1,
+      "bound": 1,
+      "unbound_or_problematic": []
+    },
+    "storage_classes": {
+      "total": 11,
+      "items": [
+        {
+          "name": "azurefile",
+          "provisioner": "file.csi.azure.com",
+          "reclaim_policy": "Delete",
+          "volume_binding_mode": "Immediate",
+          "allow_volume_expansion": true
+        },
+        {
+          "name": "azurefile-csi",
+          "provisioner": "file.csi.azure.com",
+          "reclaim_policy": "Delete",
+          "volume_binding_mode": "Immediate",
+          "allow_volume_expansion": true
+        },
+        {
+          "name": "azurefile-csi-premium",
+          "provisioner": "file.csi.azure.com",
+          "reclaim_policy": "Delete",
+          "volume_binding_mode": "Immediate",
+          "allow_volume_expansion": true
+        },
+        {
+          "name": "azurefile-premium",
+          "provisioner": "file.csi.azure.com",
+          "reclaim_policy": "Delete",
+          "volume_binding_mode": "Immediate",
+          "allow_volume_expansion": true
+        },
+        {
+          "name": "default",
+          "provisioner": "disk.csi.azure.com",
+          "reclaim_policy": "Delete",
+          "volume_binding_mode": "WaitForFirstConsumer",
+          "allow_volume_expansion": true
+        },
+        {
+          "name": "managed",
+          "provisioner": "disk.csi.azure.com",
+          "reclaim_policy": "Delete",
+          "volume_binding_mode": "WaitForFirstConsumer",
+          "allow_volume_expansion": true
+        },
+        {
+          "name": "managed-csi",
+          "provisioner": "disk.csi.azure.com",
+          "reclaim_policy": "Delete",
+          "volume_binding_mode": "WaitForFirstConsumer",
+          "allow_volume_expansion": true
+        },
+        {
+          "name": "managed-csi-premium",
+          "provisioner": "disk.csi.azure.com",
+          "reclaim_policy": "Delete",
+          "volume_binding_mode": "WaitForFirstConsumer",
+          "allow_volume_expansion": true
+        },
+        {
+          "name": "managed-csi-premium-v2",
+          "provisioner": "disk.csi.azure.com",
+          "reclaim_policy": "Delete",
+          "volume_binding_mode": "WaitForFirstConsumer",
+          "allow_volume_expansion": true
+        },
+        {
+          "name": "managed-premium",
+          "provisioner": "disk.csi.azure.com",
+          "reclaim_policy": "Delete",
+          "volume_binding_mode": "WaitForFirstConsumer",
+          "allow_volume_expansion": true
+        },
+        {
+          "name": "mysql-managed-disk",
+          "provisioner": "disk.csi.azure.com",
+          "reclaim_policy": "Retain",
+          "volume_binding_mode": "WaitForFirstConsumer",
+          "allow_volume_expansion": true
+        }
+      ]
+    },
+    "pod_storage_failures": {
+      "count": 0,
+      "pods": []
+    },
+    "storage_events": {
+      "count": 0,
+      "events_available": true,
+      "events": [],
+      "error": null
+    },
+    "run_command_invocations": 1,
+    "query_errors": [],
+    "blockers": [],
+    "warnings": [],
+    "recommendations": [
+      "No storage issues detected."
+    ]
+  },
+  "deprecated_api_health": {
+    "subscription_id": "bb0e2c9e-d7fb-45e4-92cf-654f380e6388",
+    "resource_group": "AKS_Upgrade_Agent",
+    "cluster_name": "AKS_oldapp_cluster",
+    "scope": "all-namespaces",
+    "target_kubernetes_version": "1.36.3",
+    "target_version_source": "user_provided",
+    "assessment": "PASS",
+    "deprecated_api_health": "PASS",
+    "checked_api_versions": [
+      "extensions/v1beta1 Ingress",
+      "networking.k8s.io/v1beta1 Ingress",
+      "batch/v1beta1 CronJob",
+      "policy/v1beta1 PodDisruptionBudget",
+      "policy/v1beta1 PodSecurityPolicy",
+      "scheduling.k8s.io/v1beta1 PriorityClass",
+      "admissionregistration.k8s.io/v1beta1 MutatingWebhookConfiguration",
+      "admissionregistration.k8s.io/v1beta1 ValidatingWebhookConfiguration",
+      "apiextensions.k8s.io/v1beta1 CustomResourceDefinition",
+      "apiregistration.k8s.io/v1beta1 APIService",
+      "rbac.authorization.k8s.io/v1beta1 ClusterRole",
+      "rbac.authorization.k8s.io/v1beta1 ClusterRoleBinding",
+      "certificates.k8s.io/v1beta1 CertificateSigningRequest",
+      "coordination.k8s.io/v1beta1 Lease",
+      "discovery.k8s.io/v1beta1 EndpointSlice",
+      "autoscaling/v2beta1 HorizontalPodAutoscaler",
+      "autoscaling/v2beta2 HorizontalPodAutoscaler"
+    ],
+    "apis_not_served": [
+      "admissionregistration.k8s.io/v1beta1 (MutatingWebhookConfiguration)",
+      "admissionregistration.k8s.io/v1beta1 (ValidatingWebhookConfiguration)",
+      "apiextensions.k8s.io/v1beta1 (CustomResourceDefinition)",
+      "apiregistration.k8s.io/v1beta1 (APIService)",
+      "autoscaling/v2beta1 (HorizontalPodAutoscaler)",
+      "autoscaling/v2beta2 (HorizontalPodAutoscaler)",
+      "batch/v1beta1 (CronJob)",
+      "certificates.k8s.io/v1beta1 (CertificateSigningRequest)",
+      "coordination.k8s.io/v1beta1 (Lease)",
+      "discovery.k8s.io/v1beta1 (EndpointSlice)",
+      "extensions/v1beta1 (Ingress)",
+      "networking.k8s.io/v1beta1 (Ingress)",
+      "policy/v1beta1 (PodDisruptionBudget)",
+      "policy/v1beta1 (PodSecurityPolicy)",
+      "rbac.authorization.k8s.io/v1beta1 (ClusterRole)",
+      "rbac.authorization.k8s.io/v1beta1 (ClusterRoleBinding)",
+      "scheduling.k8s.io/v1beta1 (PriorityClass)"
+    ],
+    "resources_checked": 0,
+    "deprecated_resources_found": 0,
+    "supported_resources": [],
+    "run_command_invocations": 1,
+    "findings": [],
+    "query_errors": [],
+    "blockers": [],
+    "warnings": [],
+    "recommendations": [
+      "No deprecated or removed Kubernetes API usage detected for the target version.",
+      "The current cluster does not serve some legacy API versions; they are listed under apis_not_served and are not treated as active usage."
+    ]
+  }
+}

@@ -250,6 +250,25 @@ def _execute_confirmed_upgrade(
         )
 
     # Control plane is already at target. For control-plane-only approval, verify only the control plane.
+    control_plane_smoke = _safe_post_upgrade_smoke_checks(
+        subscription_id,
+        resource_group,
+        cluster_name,
+        target_kubernetes_version,
+        stage="control_plane",
+        namespace=namespace,
+    )
+    result["post_upgrade_smoke_checks"].append(control_plane_smoke)
+    if control_plane_smoke["status"] != "PASS":
+        return _finish(
+            result,
+            "failed",
+            control_plane_smoke["message"],
+            "POST_UPGRADE_SMOKE_CHECKS_FAILED",
+            "post_upgrade_smoke_checks",
+            blockers=control_plane_smoke.get("blockers", []),
+        )
+
     if confirmed_scope == "control_plane_only":
         verification = _safe_post_execution_snapshot(
             subscription_id, resource_group, cluster_name, target_kubernetes_version, include_node_pools=False
@@ -357,7 +376,27 @@ def _execute_confirmed_upgrade(
             pool_result["status"] = "completed"
             pool_result["path_status"] = "NOT_REQUIRED"
             pool_result["after"] = sync_upgrade._pool_execution_state(pool)
+            pool_smoke = _safe_post_upgrade_smoke_checks(
+                subscription_id,
+                resource_group,
+                cluster_name,
+                target_kubernetes_version,
+                stage="node_pool",
+                node_pool_name=pool_name,
+                namespace=namespace,
+            )
+            pool_result["post_upgrade_smoke_checks"] = pool_smoke
+            result["post_upgrade_smoke_checks"].append(pool_smoke)
             result["node_pools"].append(pool_result)
+            if pool_smoke["status"] != "PASS":
+                return _finish(
+                    result,
+                    "partial",
+                    pool_smoke["message"],
+                    "POST_UPGRADE_SMOKE_CHECKS_FAILED",
+                    "post_upgrade_smoke_checks",
+                    blockers=pool_smoke.get("blockers", []),
+                )
             continue
 
         result["node_pools"].append(pool_result)
@@ -421,6 +460,24 @@ def _execute_confirmed_upgrade(
             verification["message"],
             "POST_UPGRADE_VERIFICATION_FAILED",
             "post_upgrade_verification",
+        )
+    complete_smoke = _safe_post_upgrade_smoke_checks(
+        subscription_id,
+        resource_group,
+        cluster_name,
+        target_kubernetes_version,
+        stage="complete_cluster",
+        namespace=namespace,
+    )
+    result["post_upgrade_smoke_checks"].append(complete_smoke)
+    if complete_smoke["status"] != "PASS":
+        return _finish(
+            result,
+            "failed",
+            complete_smoke["message"],
+            "POST_UPGRADE_SMOKE_CHECKS_FAILED",
+            "post_upgrade_smoke_checks",
+            blockers=complete_smoke.get("blockers", []),
         )
     result["next_action"] = None
     return _finish(result, "completed", "Complete-cluster upgrade verification succeeded.", "UPGRADE_COMPLETED", None)
@@ -495,6 +552,56 @@ def _safe_post_execution_snapshot(
         return {"is_successful": False, "message": str(exc)}
 
 
+def _safe_post_upgrade_smoke_checks(
+    subscription_id: str,
+    resource_group: str,
+    cluster_name: str,
+    target: str,
+    *,
+    stage: str,
+    node_pool_name: str | None = None,
+    namespace: str | None = None,
+) -> dict[str, Any]:
+    try:
+        result = sync_upgrade.aks_run_post_upgrade_smoke_checks(
+            subscription_id,
+            resource_group,
+            cluster_name,
+            target,
+            stage=stage,
+            node_pool_name=node_pool_name,
+            namespace=namespace,
+        )
+    except Exception as exc:  # noqa: BLE001
+        message = f"Post-upgrade smoke checks could not be completed: {exc}"
+        return {
+            "stage": stage,
+            "node_pool_name": node_pool_name,
+            "status": "INCOMPLETE",
+            "message": message,
+            "blockers": [str(exc)],
+            "warnings": [],
+            "stage_summary": sync_upgrade.aks_stage_result_summary(
+                stage,
+                "INCOMPLETE",
+                message=message,
+                blockers=[str(exc)],
+            ),
+        }
+    message = "Post-upgrade smoke checks passed." if result.get("status") == "PASS" else "Post-upgrade smoke checks did not pass."
+    return {
+        **result,
+        "message": message,
+        "stage_summary": sync_upgrade.aks_stage_result_summary(
+            stage,
+            result.get("status", "INCOMPLETE"),
+            message=message,
+            blockers=result.get("blockers", []),
+            warnings=result.get("warnings", []),
+        ),
+    }
+
+
 def _result(target: str, scope: str) -> dict[str, Any]:
     return {
         "status": "blocked",
@@ -515,6 +622,7 @@ def _result(target: str, scope: str) -> dict[str, Any]:
         "node_pool_profile_after_control_plane": None,
         "node_pools": [],
         "post_upgrade_verification": None,
+        "post_upgrade_smoke_checks": [],
         "next_action": None,
         "blockers": [],
         "warnings": [],

@@ -72,6 +72,13 @@ _SHELL_OPERATOR_RE = re.compile(r"[;&|<>`$]")
 
 _AZ_CLI_LOGIN_LOCK = threading.Lock()
 _AZ_CLI_LOGGED_IN = False
+_MAX_TOOL_OUTPUT_CHARS = 12000
+
+
+def _bounded_output(raw: str) -> tuple[str, bool]:
+    if len(raw) <= _MAX_TOOL_OUTPUT_CHARS:
+        return raw, False
+    return raw[:_MAX_TOOL_OUTPUT_CHARS], True
 
 
 def _validate_command_tokens(tokens: list[str], expected_cli: str) -> list[str]:
@@ -215,7 +222,8 @@ def aks_kubectl_read(
     tokens = _command_tokens(command, "kubectl")
     _validate_kubectl(tokens, write=False)
     raw = run_kubectl_raw(subscription_id, resource_group, cluster_name, shlex.join(tokens))
-    return {"command": shlex.join(tokens), "output": raw}
+    output, truncated = _bounded_output(raw)
+    return {"command": shlex.join(tokens), "output": output, "output_truncated": truncated}
 
 
 def aks_kubectl_write(
@@ -241,7 +249,8 @@ def aks_kubectl_write(
         raise PermissionError("This CLI operation deletes cluster objects; pass confirm_destructive=True to proceed.")
 
     raw = run_kubectl_raw(subscription_id, resource_group, cluster_name, shlex.join(tokens))
-    return {"command": shlex.join(tokens), "output": raw, "destructive": destructive}
+    output, truncated = _bounded_output(raw)
+    return {"command": shlex.join(tokens), "output": output, "output_truncated": truncated, "destructive": destructive}
 
 
 def aks_az_read(command: str) -> dict[str, Any]:
@@ -249,7 +258,8 @@ def aks_az_read(command: str) -> dict[str, Any]:
     tokens = _command_tokens(command, "az")
     _validate_az(tokens, write=False)
     raw = _run_azure_cli(shlex.join(tokens))
-    return {"command": shlex.join(tokens), "output": raw}
+    output, truncated = _bounded_output(raw)
+    return {"command": shlex.join(tokens), "output": output, "output_truncated": truncated}
 
 
 def aks_az_write(
@@ -265,4 +275,5 @@ def aks_az_write(
     tokens = _command_tokens(command, "az")
     _validate_az(tokens, write=True)
     raw = _run_azure_cli(shlex.join(tokens))
-    return {"command": shlex.join(tokens), "output": raw}
+    output, truncated = _bounded_output(raw)
+    return {"command": shlex.join(tokens), "output": output, "output_truncated": truncated}

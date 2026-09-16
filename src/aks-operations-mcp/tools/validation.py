@@ -16,6 +16,8 @@ from __future__ import annotations
 import json
 import math
 import re
+import shlex
+from urllib.parse import urlsplit
 from typing import Any
 
 from tools.common import (
@@ -265,7 +267,7 @@ def _parse_batch_json(batch: dict[str, tuple[int, str]], label: str) -> tuple[li
     if not raw_json.strip():
         return [], [f"{label}: kubectl returned no JSON output"]
     try:
-        payload = json.loads(raw_json)
+        payload = json.loads(raw_json, strict=False)
     except json.JSONDecodeError as exc:
         return [], [f"{label}: invalid JSON output: {exc}"]
     return payload.get("items", []), []
@@ -365,6 +367,24 @@ def _extract_observable_version(item: dict[str, Any]) -> str | None:
     return None
 
 
+def _operator_health_summary(
+    status: str,
+    operators: list[dict[str, Any]],
+    unhealthy: list[dict[str, Any]],
+    version_mismatches: list[dict[str, Any]],
+    query_errors: list[str],
+) -> dict[str, Any]:
+    """Return the compact operator-health facts needed for stage and agent summaries."""
+    return {
+        "status": status,
+        "operators_checked": len(operators),
+        "healthy_operators": sum(1 for operator in operators if operator.get("healthy")),
+        "unhealthy_operators": len(unhealthy),
+        "version_mismatches": len(version_mismatches),
+        "query_errors": len(query_errors),
+    }
+
+
 def aks_check_operator_health(
     subscription_id: str,
     resource_group: str,
@@ -387,6 +407,7 @@ def aks_check_operator_health(
             "reason": "Operator upgrade validation is enabled for SIT only.",
             "operators": [],
             "query_errors": [],
+            "summary": _operator_health_summary("SKIPPED", [], [], [], []),
         }
     if namespace is not None:
         validate_namespace(namespace)
@@ -397,6 +418,7 @@ def aks_check_operator_health(
             "scope": namespace or "all-namespaces",
             "operators": [],
             "query_errors": [],
+            "summary": _operator_health_summary("NOT_CONFIGURED", [], [], [], []),
             "recommendation": "Configure the SIT operator namespace and/or label selector.",
         }
     _validate_selector(operator_selector)
@@ -456,7 +478,125 @@ def aks_check_operator_health(
         "unhealthy_operators": unhealthy,
         "version_mismatches": version_mismatches,
         "query_errors": query_errors,
+        "summary": _operator_health_summary(status, operators, unhealthy, version_mismatches, query_errors),
         "run_command_invocations": 1,
+    }
+
+
+def _validate_probe_url(url: str) -> None:
+    parsed = urlsplit(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+        raise ValueError("url must be an absolute http:// or https:// URL without embedded credentials.")
+    if parsed.fragment:
+        raise ValueError("url must not contain a fragment.")
+
+
+def aks_check_service_ingress_urls(
+    subscription_id: str,
+    resource_group: str,
+    cluster_name: str,
+    namespace: str | None = None,
+    service_name: str | None = None,
+    ingress_name: str | None = None,
+    url: str | None = None,
+) -> dict[str, Any]:
+    """Check Service/Ingress exposure and optionally probe an HTTP(S) URL from the cluster."""
+    if namespace is not None:
+        validate_namespace(namespace)
+    if service_name is not None:
+        validate_k8s_name(service_name, "service")
+    if ingress_name is not None:
+        validate_k8s_name(ingress_name, "ingress")
+    if url is not None:
+        _validate_probe_url(url)
+
+    scope = f"-n {namespace}" if namespace else "-A"
+    service_scope = f"{scope} {service_name}" if service_name else scope
+    ingress_scope = f"{scope} {ingress_name}" if ingress_name else scope
+    query_errors: list[str] = []
+    try:
+        batch = run_kubectl_batch(
+            subscription_id,
+            resource_group,
+            cluster_name,
+            {
+                "services": f"get services {service_scope}".strip(),
+                "ingresses": f"get ingress {ingress_scope}".strip(),
+            },
+        )
+    except Exception as exc:  # noqa: BLE001
+        batch = {}
+        query_errors.append(f"service/ingress query failed: {exc}")
+
+    services, service_errors = _parse_batch_json(batch, "services")
+    ingresses, ingress_errors = _parse_batch_json(batch, "ingresses")
+    query_errors.extend(service_errors + ingress_errors)
+
+    service_results: list[dict[str, Any]] = []
+    for item in services:
+        metadata = item.get("metadata", {})
+        status = item.get("status", {}) or {}
+        load_balancer = status.get("loadBalancer", {}) or {}
+        ingress = load_balancer.get("ingress", []) or []
+        service_results.append({
+            "namespace": metadata.get("namespace"),
+            "name": metadata.get("name"),
+            "type": (item.get("spec", {}) or {}).get("type"),
+            "cluster_ip": (item.get("spec", {}) or {}).get("clusterIP"),
+            "external_endpoints": [entry.get("ip") or entry.get("hostname") for entry in ingress],
+            "ports": (item.get("spec", {}) or {}).get("ports", []),
+        })
+
+    ingress_results: list[dict[str, Any]] = []
+    for item in ingresses:
+        metadata = item.get("metadata", {})
+        status = item.get("status", {}) or {}
+        ingress_results.append({
+            "namespace": metadata.get("namespace"),
+            "name": metadata.get("name"),
+            "hosts": [rule.get("host") for rule in (item.get("spec", {}) or {}).get("rules", []) if rule.get("host")],
+            "addresses": [entry.get("ip") or entry.get("hostname") for entry in status.get("loadBalancer", {}).get("ingress", []) or []],
+        })
+
+    url_probe: dict[str, Any] | None = None
+    if url is not None:
+        command = f"curl -sS -L --max-time 10 -o /dev/null -w '%{{http_code}}' {shlex.quote(url)}"
+        try:
+            raw = run_kubectl_raw(subscription_id, resource_group, cluster_name, command).strip()
+            match = re.search(r"(\d{3})$", raw)
+            status_code = int(match.group(1)) if match else None
+            url_probe = {
+                "url": url,
+                "http_status": status_code,
+                "status": "PASS" if status_code is not None and 200 <= status_code < 400 else "WARNING",
+                "raw_output": raw,
+            }
+        except Exception as exc:  # noqa: BLE001
+            url_probe = {"url": url, "http_status": None, "status": "INCOMPLETE", "error": str(exc)}
+
+    warnings: list[str] = []
+    if not services and not service_errors and service_name:
+        warnings.append(f"Service '{service_name}' was not found in the requested scope.")
+    if not ingresses and not ingress_errors and ingress_name:
+        warnings.append(f"Ingress '{ingress_name}' was not found in the requested scope.")
+    if url_probe and url_probe["status"] == "WARNING":
+        warnings.append(f"URL returned HTTP {url_probe['http_status']}: {url}.")
+    if url_probe and url_probe["status"] == "INCOMPLETE":
+        query_errors.append(f"URL probe failed: {url_probe['error']}")
+
+    status = "INCOMPLETE" if query_errors else ("WARNING" if warnings else "PASS")
+    return {
+        "status": status,
+        "scope": namespace or "all-namespaces",
+        "service_name": service_name,
+        "ingress_name": ingress_name,
+        "services": service_results,
+        "ingresses": ingress_results,
+        "url_probe": url_probe,
+        "query_errors": query_errors,
+        "warnings": warnings,
+        "run_command_invocations": 1 + (1 if url is not None else 0),
+        "recommendation": "Use an explicit URL probe when application reachability must be verified from inside the cluster.",
     }
 
 

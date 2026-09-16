@@ -1,0 +1,86 @@
+{
+  "single_replica": {
+    "status": "WARNING",
+    "scope": "phonebook",
+    "label_selector": null,
+    "matched_workloads": [
+      {
+        "namespace": "phonebook",
+        "name": "mysql-deploy",
+        "kind": "Deployment",
+        "desired_replicas": 1,
+        "available_replicas": 1,
+        "selector": {
+          "app": "mysql-deploy"
+        }
+      },
+      {
+        "namespace": "phonebook",
+        "name": "resultserver-deploy",
+        "kind": "Deployment",
+        "desired_replicas": 2,
+        "available_replicas": 2,
+        "selector": {
+          "app": "resultserver-deploy"
+        }
+      },
+      {
+        "namespace": "phonebook",
+        "name": "webserver-deploy",
+        "kind": "Deployment",
+        "desired_replicas": 4,
+        "available_replicas": 4,
+        "selector": {
+          "app": "webserver-deploy"
+        }
+      }
+    ],
+    "single_replica_workloads": [
+      {
+        "namespace": "phonebook",
+        "name": "mysql-deploy",
+        "kind": "Deployment",
+        "desired_replicas": 1,
+        "available_replicas": 1,
+        "selector": {
+          "app": "mysql-deploy"
+        }
+      }
+    ],
+    "query_errors": [],
+    "run_command_invocations": 1,
+    "recommendation": "Scale critical single-replica Cerebral Plus workloads to 2 before node-drain-based upgrades."
+  },
+  "priority_class": {
+    "status": "NOT_CONFIGURED",
+    "namespace": "phonebook",
+    "checked_pods": [],
+    "violations": [],
+    "query_errors": [],
+    "recommendation": "Configure a critical-system pod label selector before enabling this check."
+  },
+  "node_surge": {
+    "status": "INCOMPLETE",
+    "user_pools_checked": 0,
+    "node_pools": [],
+    "recommendations": [],
+    "severity": "recommendation",
+    "query_errors": []
+  },
+  "operator_health": {
+    "status": "NOT_CONFIGURED",
+    "environment": "SIT",
+    "scope": "phonebook",
+    "operators": [],
+    "query_errors": [],
+    "summary": {
+      "status": "NOT_CONFIGURED",
+      "operators_checked": 0,
+      "healthy_operators": 0,
+      "unhealthy_operators": 0,
+      "version_mismatches": 0,
+      "query_errors": 0
+    },
+    "recommendation": "Configure the SIT operator namespace and/or label selector."
+  }
+}

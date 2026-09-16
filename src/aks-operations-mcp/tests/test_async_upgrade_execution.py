@@ -174,6 +174,7 @@ def test_control_plane_submission_returns_without_waiting(monkeypatch):
     assert result["write_accepted"] is True
     assert len(client.managed_clusters.writes) == 1
     assert result["control_plane"]["status"] == "started"
+    assert result["post_upgrade_smoke_checks"] == []
 
 
 def test_existing_control_plane_operation_is_not_duplicated(monkeypatch):
@@ -212,6 +213,8 @@ def test_control_plane_only_does_not_require_node_pool_target(monkeypatch):
     assert result["status"] == "completed"
     assert result["reason_code"] == "CONTROL_PLANE_ONLY_SCOPE"
     assert result["post_upgrade_verification"]["is_successful"] is True
+    assert result["post_upgrade_smoke_checks"][0]["stage"] == "control_plane"
+    assert result["post_upgrade_smoke_checks"][0]["status"] == "PASS"
 
 
 def test_node_pool_submission_returns_without_waiting(monkeypatch):
@@ -305,3 +308,38 @@ def test_complete_cluster_advances_and_finishes_after_node_pool_reaches_target(m
     assert final["status"] == "completed"
     assert final["reason_code"] == "UPGRADE_COMPLETED"
     assert len(client.agent_pools.writes) == 1
+    assert [item["stage"] for item in final["post_upgrade_smoke_checks"]] == [
+        "control_plane",
+        "node_pool",
+        "complete_cluster",
+    ]
+    assert final["node_pools"][0]["post_upgrade_smoke_checks"]["status"] == "PASS"
+    assert final["post_upgrade_smoke_checks"][0]["stage_summary"]["next_action"] == "continue"
+    assert final["post_upgrade_smoke_checks"][1]["stage_summary"]["stage"] == "node_pool"
+    assert final["post_upgrade_smoke_checks"][2]["stage_summary"]["status"] == "PASS"
+
+
+def test_node_pool_smoke_failure_blocks_completion(monkeypatch):
+    cluster = _cluster(TARGET, "Succeeded")
+    pool = _pool("nodepool1", TARGET, "Succeeded")
+    client, _ = _wire(monkeypatch, cluster, pool, pool_supported=True)
+
+    def smoke(*_args, **kwargs):
+        stage = kwargs.get("stage")
+        return {
+            "stage": stage,
+            "node_pool_name": kwargs.get("node_pool_name"),
+            "status": "BLOCKED" if stage == "node_pool" else "PASS",
+            "blockers": ["pod health failed"] if stage == "node_pool" else [],
+            "warnings": [],
+        }
+
+    monkeypatch.setattr(async_upgrade.sync_upgrade, "aks_run_post_upgrade_smoke_checks", smoke)
+
+    result = async_upgrade.aks_execute_confirmed_upgrade(*ARGS, TARGET, confirmed_scope="complete_cluster")
+
+    assert result["status"] == "partial"
+    assert result["reason_code"] == "POST_UPGRADE_SMOKE_CHECKS_FAILED"
+    assert result["blocked_stage"] == "post_upgrade_smoke_checks"
+    assert result["blockers"] == ["pod health failed"]
+    assert client.agent_pools.writes == []

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from typing import Any, Callable
 
-from tools.common import get_container_service_client
+from tools.common import get_container_service_client, run_kubectl_batch, run_kubectl_raw
 from tools.deprecated_apis import aks_check_deprecated_apis
 from tools.discovery import aks_get_available_upgrades, aks_get_cluster_details, aks_get_node_pools
 from tools.storage import aks_check_storage
@@ -37,6 +38,218 @@ def aks_get_upgrade_execution_status(
         "cluster_name": cluster_name,
         "cluster": _cluster_execution_state(cluster),
         "node_pools": [_pool_execution_state(pool) for pool in pools],
+    }
+
+
+def aks_collect_pre_upgrade_inventory(
+    subscription_id: str,
+    resource_group: str,
+    cluster_name: str,
+) -> dict[str, Any]:
+    """Run a read-only pre-upgrade inventory and capture the current cluster state."""
+    cluster = aks_get_cluster_details(subscription_id, resource_group, cluster_name)
+    pools = aks_get_node_pools(subscription_id, resource_group, cluster_name)
+
+    batch = run_kubectl_batch(
+        subscription_id,
+        resource_group,
+        cluster_name,
+        {
+            "kube_version": "version --short",
+            "nodes": "get nodes -o json",
+            "pods": "get pods -A -o json",
+            "pvcs": "get pvc -A -o json",
+            "pvs": "get pv -o json",
+            "crds": "get crd -o json",
+        },
+    )
+
+    def _safe_json(key: str) -> dict[str, Any]:
+        exit_code, raw = batch.get(key, (1, ""))
+        if exit_code != 0 or not raw.strip():
+            return {}
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+
+    kube_version = _safe_json("kube_version")
+    nodes_payload = _safe_json("nodes")
+    pods_payload = _safe_json("pods")
+    pvc_payload = _safe_json("pvcs")
+    pv_payload = _safe_json("pvs")
+    crd_payload = _safe_json("crds")
+
+    def _node_summary(item: dict[str, Any]) -> dict[str, Any]:
+        metadata = item.get("metadata", {})
+        status = item.get("status", {}) or {}
+        conditions = {condition.get("type"): condition.get("status") for condition in status.get("conditions", []) or []}
+        node_info = status.get("nodeInfo", {}) or {}
+        return {
+            "name": metadata.get("name"),
+            "ready": conditions.get("Ready") == "True",
+            "conditions": {key: conditions.get(key) for key in ("Ready", "MemoryPressure", "DiskPressure", "PIDPressure") if key in conditions},
+            "kubelet_version": node_info.get("kubeletVersion"),
+            "os_image": node_info.get("osImage"),
+            "container_runtime": node_info.get("containerRuntimeVersion"),
+        }
+
+    def _pod_summary(item: dict[str, Any]) -> dict[str, Any]:
+        metadata = item.get("metadata", {})
+        status = item.get("status", {}) or {}
+        waiting = []
+        restart_count = 0
+        for container in status.get("containerStatuses", []) or []:
+            restart_count += int(container.get("restartCount", 0) or 0)
+            state = container.get("state", {}) or {}
+            if state.get("waiting", {}).get("reason"):
+                waiting.append(state["waiting"].get("reason"))
+        return {
+            "namespace": metadata.get("namespace"),
+            "name": metadata.get("name"),
+            "phase": status.get("phase"),
+            "ready": all(container.get("ready", False) for container in status.get("containerStatuses", []) or []) if status.get("containerStatuses") else None,
+            "restart_count": restart_count,
+            "waiting_reasons": waiting,
+        }
+
+    def _pvc_summary(item: dict[str, Any]) -> dict[str, Any]:
+        metadata = item.get("metadata", {})
+        spec = item.get("spec", {}) or {}
+        return {
+            "namespace": metadata.get("namespace"),
+            "name": metadata.get("name"),
+            "phase": (item.get("status", {}) or {}).get("phase"),
+            "access_modes": (item.get("status", {}) or {}).get("accessModes", spec.get("accessModes", [])),
+            "storage_class": spec.get("storageClassName"),
+            "volume_name": spec.get("volumeName"),
+        }
+
+    def _pv_summary(item: dict[str, Any]) -> dict[str, Any]:
+        metadata = item.get("metadata", {})
+        spec = item.get("spec", {}) or {}
+        return {
+            "name": metadata.get("name"),
+            "phase": (item.get("status", {}) or {}).get("phase"),
+            "capacity": spec.get("capacity", {}).get("storage"),
+            "access_modes": spec.get("accessModes", []),
+            "storage_class": spec.get("storageClassName"),
+            "claim": ((spec.get("claimRef", {}) or {}).get("namespace"), (spec.get("claimRef", {}) or {}).get("name")) if spec.get("claimRef") else None,
+        }
+
+    def _crd_summary(item: dict[str, Any]) -> dict[str, Any]:
+        spec = item.get("spec", {}) or {}
+        return {
+            "name": item.get("metadata", {}).get("name"),
+            "group": spec.get("group"),
+            "kind": spec.get("names", {}).get("kind"),
+            "served_versions": [version.get("name") for version in spec.get("versions", []) or [] if version.get("served")],
+            "storage_versions": [version.get("name") for version in spec.get("versions", []) or [] if version.get("storage")],
+            "conversion_strategy": (spec.get("conversion", {}) or {}).get("strategy", "None"),
+        }
+
+    node_items = nodes_payload.get("items", [])
+    pod_items = pods_payload.get("items", [])
+    pvc_items = pvc_payload.get("items", [])
+    pv_items = pv_payload.get("items", [])
+    crd_items = crd_payload.get("items", [])
+
+    helm_report = {"status": "REPORT", "output": []}
+    try:
+        helm_output = run_kubectl_raw(subscription_id, resource_group, cluster_name, "helm ls -A --short")
+        cleaned = [line.strip()[:500] for line in helm_output.splitlines() if line.strip()][:50]
+        if not cleaned or any("helm:" in line.lower() or "command not found" in line.lower() for line in cleaned):
+            raise RuntimeError("Helm is not available in the AKS Run Command environment.")
+        helm_report["output"] = cleaned
+    except Exception as exc:  # noqa: BLE001
+        helm_report = {
+            "status": "UNAVAILABLE",
+            "output": [],
+            "error": str(exc),
+        }
+
+    try:
+        storage_validation = aks_check_storage(subscription_id, resource_group, cluster_name)
+    except Exception as exc:  # noqa: BLE001
+        storage_validation = {
+            "storage_health": "INCOMPLETE",
+            "blockers": [],
+            "warnings": [f"Storage validation could not be completed: {exc}"],
+            "query_errors": [str(exc)],
+            "recommendations": ["Retry storage validation with a narrower namespace scope if needed."],
+        }
+
+    warnings: list[str] = []
+    blockers: list[str] = []
+    if helm_report["status"] == "UNAVAILABLE":
+        warnings.append("Helm inventory was unavailable; cannot confirm release state before upgrade.")
+    storage_blockers = list(storage_validation.get("blockers", []) or [])
+    storage_warnings = list(storage_validation.get("warnings", []) or [])
+    if storage_blockers:
+        blockers.extend(storage_blockers)
+    if storage_warnings:
+        warnings.extend(storage_warnings)
+    if storage_validation.get("storage_health") == "BLOCKED":
+        blockers.extend(storage_blockers)
+    if storage_validation.get("storage_health") in {"WARNING", "INCOMPLETE"}:
+        warnings.extend(storage_warnings)
+
+    inventory = {
+        "cluster": cluster,
+        "node_pools": pools.get("node_pools", []),
+        "kubectl_version": {
+            "client_version": kube_version.get("clientVersion", {}).get("gitVersion"),
+            "raw": kube_version,
+        },
+        "nodes": {
+            "total_nodes": len(node_items),
+            "items": [_node_summary(item) for item in node_items],
+        },
+        "pods": {
+            "total_pods": len(pod_items),
+            "phase_counts": {phase: sum(1 for item in pod_items if (item.get("status", {}) or {}).get("phase") == phase) for phase in {((item.get("status", {}) or {}).get("phase")) for item in pod_items}},
+            "unhealthy": [_pod_summary(item) for item in pod_items if (item.get("status", {}) or {}).get("phase") not in {"Running", "Succeeded"} or any((container.get("state", {}) or {}).get("waiting", {}).get("reason") for container in (item.get("status", {}) or {}).get("containerStatuses", []) or [])],
+        },
+        "storage": {
+            "pvcs": {"total_pvcs": len(pvc_items), "items": [_pvc_summary(item) for item in pvc_items]},
+            "pvs": {"total_pvs": len(pv_items), "items": [_pv_summary(item) for item in pv_items]},
+        },
+        "helm": helm_report,
+        "storage_validation": storage_validation,
+        "crds": {"total_crds": len(crd_items), "items": [_crd_summary(item) for item in crd_items]},
+    }
+
+    if not cluster.get("provisioning_state") or cluster.get("provisioning_state") != "Succeeded":
+        blockers.append("Cluster is not in a Succeeded provisioning state before upgrade.")
+
+    status = "BLOCKED" if blockers else ("WARN" if warnings else "PASS")
+    return {
+        "subscription_id": subscription_id,
+        "resource_group": resource_group,
+        "cluster_name": cluster_name,
+        "status": status,
+        "inventory": inventory,
+        "warnings": warnings,
+        "blockers": blockers,
+    }
+
+
+def aks_stage_result_summary(
+    stage: str,
+    status: str,
+    *,
+    message: str | None = None,
+    blockers: list[str] | None = None,
+    warnings: list[str] | None = None,
+) -> dict[str, Any]:
+    """Normalize a stage result into a standard machine-readable summary."""
+    return {
+        "stage": stage,
+        "status": str(status).upper(),
+        "message": message or "No message provided.",
+        "blockers": blockers or [],
+        "warnings": warnings or [],
+        "next_action": "stop" if str(status).upper() in {"BLOCKED", "FAILED", "INCOMPLETE"} else "continue",
     }
 
 
@@ -455,6 +668,95 @@ def _post_upgrade_verification(
         "blockers": blockers,
         "warnings": list(readiness["readiness"].get("warnings", [])),
         "is_successful": not blockers,
+    }
+
+
+def aks_run_post_upgrade_smoke_checks(
+    subscription_id: str,
+    resource_group: str,
+    cluster_name: str,
+    target_kubernetes_version: str,
+    stage: str = "complete_cluster",
+    node_pool_name: str | None = None,
+    namespace: str | None = None,
+) -> dict[str, Any]:
+    """Run read-only post-upgrade platform smoke checks after a completed AKS stage."""
+    if stage not in {"control_plane", "node_pool", "complete_cluster"}:
+        raise ValueError("stage must be 'control_plane', 'node_pool', or 'complete_cluster'.")
+    if stage == "node_pool" and not node_pool_name:
+        raise ValueError("node_pool_name is required when stage='node_pool'.")
+
+    execution_status = aks_get_upgrade_execution_status(subscription_id, resource_group, cluster_name)
+    cluster_state = execution_status.get("cluster", {})
+    node_pools = execution_status.get("node_pools", [])
+
+    version_checks: list[dict[str, Any]] = []
+    cluster_observed = cluster_state.get("current_kubernetes_version") or cluster_state.get("kubernetes_version")
+    include_cluster = stage in {"control_plane", "complete_cluster"}
+    if include_cluster:
+        version_checks.append({
+            "resource_type": "control_plane",
+            "name": cluster_name,
+            "observed_version": cluster_observed,
+            "target_version": target_kubernetes_version,
+            "provisioning_state": cluster_state.get("provisioning_state"),
+            "status": "PASS" if cluster_observed == target_kubernetes_version and cluster_state.get("provisioning_state") == "Succeeded" else "BLOCKED",
+        })
+
+    selected_pools = node_pools
+    if stage == "node_pool":
+        selected_pools = [pool for pool in node_pools if pool.get("name") == node_pool_name]
+        if not selected_pools:
+            version_checks.append({
+                "resource_type": "node_pool",
+                "name": node_pool_name,
+                "observed_version": None,
+                "target_version": target_kubernetes_version,
+                "provisioning_state": None,
+                "status": "BLOCKED",
+                "reason": "Node pool was not found in the execution-status snapshot.",
+            })
+    if stage in {"node_pool", "complete_cluster"}:
+        for pool in selected_pools:
+            observed = pool.get("current_orchestrator_version") or pool.get("orchestrator_version")
+            version_checks.append({
+                "resource_type": "node_pool",
+                "name": pool.get("name"),
+                "observed_version": observed,
+                "target_version": target_kubernetes_version,
+                "provisioning_state": pool.get("provisioning_state"),
+                "status": "PASS" if observed == target_kubernetes_version and pool.get("provisioning_state") == "Succeeded" else "BLOCKED",
+            })
+
+    readiness = aks_validate_upgrade_readiness(
+        subscription_id=subscription_id,
+        resource_group=resource_group,
+        cluster_name=cluster_name,
+        namespace=namespace,
+        check_mode="full",
+        target_kubernetes_version=target_kubernetes_version,
+    )
+    blockers = [
+        f"{item['resource_type']} '{item['name']}' is not at target with Succeeded provisioning state."
+        for item in version_checks
+        if item.get("status") != "PASS"
+    ]
+    blockers.extend(readiness.get("readiness", {}).get("blockers", []))
+    warnings = list(readiness.get("readiness", {}).get("warnings", []))
+
+    return {
+        "subscription_id": subscription_id,
+        "resource_group": resource_group,
+        "cluster_name": cluster_name,
+        "target_kubernetes_version": target_kubernetes_version,
+        "stage": stage,
+        "node_pool_name": node_pool_name,
+        "namespace": namespace or "all-namespaces",
+        "status": "PASS" if not blockers else "BLOCKED",
+        "version_checks": version_checks,
+        "readiness": readiness,
+        "blockers": blockers,
+        "warnings": warnings,
     }
 
 

@@ -43,9 +43,10 @@ The Foundry Agent consumes this MCP server's tools through a Foundry Toolbox. To
 3. It submits at most one Azure long-running upgrade operation per call and returns without waiting for the Azure operation to finish.
 4. The agent should use `aks_get_upgrade_execution_status` to observe the live provisioning/version state before advancing the workflow.
 5. Once the current stage has reached its target version and `Succeeded` provisioning state, the agent can call `aks_execute_confirmed_upgrade` again with the same target and scope to advance to the next stage.
-6. For `complete_cluster`, node-pool upgrade evidence is refreshed only after the control-plane target is observed. A node pool is modified only when fresh Azure evidence shows the target path is `SUPPORTED`.
-7. If a control-plane or node-pool operation is already in progress, the coordinator returns an `in_progress` state and does not submit a duplicate write.
-8. The coordinator returns `completed`, `partial`, `blocked`, or `failed` states rather than holding the MCP request open for the full Azure long-running operation.
+6. When a completed control-plane or node-pool stage is observed, the coordinator runs read-only post-upgrade smoke checks and returns them in `post_upgrade_smoke_checks`.
+7. For `complete_cluster`, node-pool upgrade evidence is refreshed only after the control-plane target is observed. A node pool is modified only when fresh Azure evidence shows the target path is `SUPPORTED`.
+8. If a control-plane or node-pool operation is already in progress, the coordinator returns an `in_progress` state and does not submit a duplicate write.
+9. The coordinator returns `completed`, `partial`, `blocked`, or `failed` states rather than holding the MCP request open for the full Azure long-running operation.
 
 In-progress tracking uses a **process-local** lock (an in-memory `threading.Lock` keyed by cluster/pool). It prevents duplicate submissions from the same MCP process, but it is **not** a distributed lock and does not coordinate across multiple MCP server replicas. `Failed`/`Canceled` terminal states are reported as-is; the coordinator does not perform speculative automatic retries.
 
