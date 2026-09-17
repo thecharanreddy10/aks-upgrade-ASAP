@@ -223,7 +223,13 @@ def aks_kubectl_read(
     _validate_kubectl(tokens, write=False)
     raw = run_kubectl_raw(subscription_id, resource_group, cluster_name, shlex.join(tokens))
     output, truncated = _bounded_output(raw)
-    return {"command": shlex.join(tokens), "output": output, "output_truncated": truncated}
+    return {
+        "command": shlex.join(tokens),
+        "output": output,
+        "output_truncated": truncated,
+        "output_limit_chars": _MAX_TOOL_OUTPUT_CHARS,
+        **({"next_action": "Use a narrower command or targeted query."} if truncated else {}),
+    }
 
 
 def aks_kubectl_write(
@@ -250,7 +256,14 @@ def aks_kubectl_write(
 
     raw = run_kubectl_raw(subscription_id, resource_group, cluster_name, shlex.join(tokens))
     output, truncated = _bounded_output(raw)
-    return {"command": shlex.join(tokens), "output": output, "output_truncated": truncated, "destructive": destructive}
+    return {
+        "command": shlex.join(tokens),
+        "output": output,
+        "output_truncated": truncated,
+        "output_limit_chars": _MAX_TOOL_OUTPUT_CHARS,
+        **({"next_action": "Use a narrower command or targeted query."} if truncated else {}),
+        "destructive": destructive,
+    }
 
 
 def aks_az_read(command: str) -> dict[str, Any]:
@@ -259,7 +272,13 @@ def aks_az_read(command: str) -> dict[str, Any]:
     _validate_az(tokens, write=False)
     raw = _run_azure_cli(shlex.join(tokens))
     output, truncated = _bounded_output(raw)
-    return {"command": shlex.join(tokens), "output": output, "output_truncated": truncated}
+    return {
+        "command": shlex.join(tokens),
+        "output": output,
+        "output_truncated": truncated,
+        "output_limit_chars": _MAX_TOOL_OUTPUT_CHARS,
+        **({"next_action": "Use a narrower command or targeted query."} if truncated else {}),
+    }
 
 
 def aks_az_write(
@@ -276,4 +295,10 @@ def aks_az_write(
     _validate_az(tokens, write=True)
     raw = _run_azure_cli(shlex.join(tokens))
     output, truncated = _bounded_output(raw)
-    return {"command": shlex.join(tokens), "output": output, "output_truncated": truncated}
+    return {
+        "command": shlex.join(tokens),
+        "output": output,
+        "output_truncated": truncated,
+        "output_limit_chars": _MAX_TOOL_OUTPUT_CHARS,
+        **({"next_action": "Use a narrower command or targeted query."} if truncated else {}),
+    }

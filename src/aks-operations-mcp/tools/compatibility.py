@@ -179,6 +179,13 @@ def aks_check_upgrade_compatibility(
         warnings.append("Some compatibility queries could not be completed.")
 
     status = "BLOCKED" if blockers else ("INCOMPLETE" if query_errors and not warnings else ("WARNING" if warnings else "PASS"))
+    problematic_nodes = [
+        item for item in node_findings
+        if not item["ready"] or any(
+            item["conditions"].get(condition) == "True"
+            for condition in ("MemoryPressure", "DiskPressure", "PIDPressure")
+        )
+    ]
     return {
         "status": status,
         "target_kubernetes_version": target_kubernetes_version,
@@ -186,7 +193,12 @@ def aks_check_upgrade_compatibility(
         "unavailable_api_services": unavailable_api_services,
         "crds": crd_findings,
         "system_workloads": system_workloads,
-        "nodes": node_findings,
+        "nodes": problematic_nodes,
+        "node_summary": {
+            "checked": len(node_findings),
+            "healthy": len(node_findings) - len(problematic_nodes),
+            "problematic": len(problematic_nodes),
+        },
         "query_errors": query_errors,
         "blockers": blockers,
         "warnings": warnings,

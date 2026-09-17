@@ -7,6 +7,7 @@ from tools.cli_operations import (
     _command_tokens,
     _validate_az,
     _validate_kubectl,
+    aks_kubectl_read,
     aks_kubectl_write,
 )
 
@@ -110,6 +111,17 @@ def test_kubectl_write_rejects_all_delete() -> None:
     tokens = _command_tokens("kubectl delete pod --all -n default", "kubectl")
     with pytest.raises(PermissionError):
         _validate_kubectl(tokens, write=True)
+
+
+def test_kubectl_read_bounds_large_output_with_follow_up_metadata(monkeypatch) -> None:
+    monkeypatch.setattr("tools.cli_operations.run_kubectl_raw", lambda *_a, **_k: "x" * 20000)
+
+    result = aks_kubectl_read("sub", "rg", "cluster", "kubectl get pods -A")
+
+    assert len(result["output"]) == 12000
+    assert result["output_truncated"] is True
+    assert result["output_limit_chars"] == 12000
+    assert result["next_action"]
 
 
 def test_azure_read_accepts_aks_show() -> None:

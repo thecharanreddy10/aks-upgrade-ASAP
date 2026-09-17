@@ -24,7 +24,8 @@ def test_upgrade_compatibility_reports_webhook_crd_and_node_findings(monkeypatch
     assert result["unavailable_api_services"][0]["name"] == "v1beta1.metrics.k8s.io"
     assert result["webhooks"][0]["has_ca_bundle"] is False
     assert result["crds"][0]["storage_versions"] == ["v1"]
-    assert result["nodes"][0]["kubelet_version"] == "v1.35.7"
+    assert result["node_summary"]["checked"] == 1
+    assert result["nodes"] == []
     assert result["run_command_invocations"] == 1
 
 

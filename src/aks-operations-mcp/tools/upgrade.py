@@ -148,6 +148,27 @@ def aks_collect_pre_upgrade_inventory(
             "conversion_strategy": (spec.get("conversion", {}) or {}).get("strategy", "None"),
         }
 
+    def _node_is_problematic(item: dict[str, Any]) -> bool:
+        status = item.get("status", {}) or {}
+        conditions = {condition.get("type"): condition.get("status") for condition in status.get("conditions", []) or []}
+        return conditions.get("Ready") != "True" or any(
+            conditions.get(condition) == "True"
+            for condition in ("MemoryPressure", "DiskPressure", "PIDPressure")
+        )
+
+    def _pvc_is_problematic(item: dict[str, Any]) -> bool:
+        return (item.get("status", {}) or {}).get("phase") != "Bound"
+
+    def _pv_is_problematic(item: dict[str, Any]) -> bool:
+        return (item.get("status", {}) or {}).get("phase") != "Bound"
+
+    def _crd_is_problematic(item: dict[str, Any]) -> bool:
+        summary = _crd_summary(item)
+        versions = (item.get("spec", {}) or {}).get("versions") or []
+        return bool(versions) and (
+            len(summary["storage_versions"]) != 1 or summary["conversion_strategy"] != "None"
+        )
+
     node_items = nodes_payload.get("items", [])
     pod_items = pods_payload.get("items", [])
     pvc_items = pvc_payload.get("items", [])
@@ -199,11 +220,11 @@ def aks_collect_pre_upgrade_inventory(
         "node_pools": pools.get("node_pools", []),
         "kubectl_version": {
             "client_version": kube_version.get("clientVersion", {}).get("gitVersion"),
-            "raw": kube_version,
         },
         "nodes": {
             "total_nodes": len(node_items),
-            "items": [_node_summary(item) for item in node_items],
+            "ready_nodes": sum(1 for item in node_items if not _node_is_problematic(item)),
+            "items": [_node_summary(item) for item in node_items if _node_is_problematic(item)],
         },
         "pods": {
             "total_pods": len(pod_items),
@@ -211,12 +232,25 @@ def aks_collect_pre_upgrade_inventory(
             "unhealthy": [_pod_summary(item) for item in pod_items if (item.get("status", {}) or {}).get("phase") not in {"Running", "Succeeded"} or any((container.get("state", {}) or {}).get("waiting", {}).get("reason") for container in (item.get("status", {}) or {}).get("containerStatuses", []) or [])],
         },
         "storage": {
-            "pvcs": {"total_pvcs": len(pvc_items), "items": [_pvc_summary(item) for item in pvc_items]},
-            "pvs": {"total_pvs": len(pv_items), "items": [_pv_summary(item) for item in pv_items]},
+            "pvcs": {
+                "total_pvcs": len(pvc_items),
+                "bound_pvcs": sum(1 for item in pvc_items if not _pvc_is_problematic(item)),
+                "items": [_pvc_summary(item) for item in pvc_items if _pvc_is_problematic(item)],
+            },
+            "pvs": {
+                "total_pvs": len(pv_items),
+                "bound_pvs": sum(1 for item in pv_items if not _pv_is_problematic(item)),
+                "items": [_pv_summary(item) for item in pv_items if _pv_is_problematic(item)],
+            },
         },
         "helm": helm_report,
         "storage_validation": storage_validation,
-        "crds": {"total_crds": len(crd_items), "items": [_crd_summary(item) for item in crd_items]},
+        "crds": {
+            "total_crds": len(crd_items),
+            "items": [_crd_summary(item) for item in crd_items if _crd_is_problematic(item)],
+        },
+        "details_available": True,
+        "detail_scope": "problematic-resources-only",
     }
 
     if not cluster.get("provisioning_state") or cluster.get("provisioning_state") != "Succeeded":

@@ -258,6 +258,22 @@ def test_authorization_contract_non_confirmation_cases_block(monkeypatch, kwargs
     assert result["cluster_modified"] is False
 
 
+def test_agent_instructions_consolidated_safety_policy_remains_explicit(monkeypatch):
+    """The reduced prompt must still contain the core safety and authorization constraints."""
+    del monkeypatch
+    main_py = Path(__file__).resolve().parents[2] / "agent-framework-agent-with-foundry-toolbox-responses" / "main.py"
+    text = main_py.read_text(encoding="utf-8")
+    assert "Assessment is strictly read-only" in text
+    assert "do not perform Kubernetes or Azure writes during assessment" in text
+    assert "Remediation is separate from assessment" in text
+    assert "explicit user approval" in text
+    assert "is_user_confirmed=true" in text
+    assert "check_mode=\"full\"" in text
+    assert "PDB / disruption / eviction safety" in text
+    assert "Storage / PV / PVC safety" in text
+    assert "Never execute an AKS control-plane or node-pool upgrade unless the user has explicitly approved the specific upgrade plan" in text
+
+
 def test_agent_instructions_require_explicit_confirmation(monkeypatch):
     """Agent instructions must require explicit approval and classify non-approval cases."""
     del monkeypatch
@@ -266,10 +282,9 @@ def test_agent_instructions_require_explicit_confirmation(monkeypatch):
     # New policy: AKS UPGRADE HUMAN APPROVAL POLICY
     assert "explicitly approved" in text
     assert "explicit approval" in text
-    assert "Never execute an AKS control-plane" in text
-    assert "explicit approval of the displayed upgrade plan" in text
-    assert "Do not execute the upgrade immediately" in text
-    assert "Stop and ask the user" in text
+    assert "Never execute an AKS control-plane or node-pool upgrade unless the user has explicitly approved the specific upgrade plan" in text
+    assert "Stop and ask for explicit approval of the displayed upgrade plan" in text
+    assert "Do not execute the upgrade immediately after assessment" in text
     assert "`control_plane_only`" in text
 
 
@@ -290,9 +305,9 @@ def test_agent_instructions_reject_confirmation_for_different_target_or_scope(mo
     main_py = Path(__file__).resolve().parents[2] / "agent-framework-agent-with-foundry-toolbox-responses" / "main.py"
     text = main_py.read_text(encoding="utf-8")
     # New policy: execute scope policy and no automatic expansion
-    assert "Never convert" in text
-    assert "never infer" in text.lower()
-    assert "do not expand" in text.lower()
+    assert "Never convert a `control_plane_only` approval into a `complete_cluster` execution" in text
+    assert "infer node-pool approval from control-plane approval" in text
+    assert "do not force or guess a node-pool upgrade" in text.lower()
 
 
 def test_agent_instructions_require_pending_plan_for_generic_confirmation(monkeypatch):
@@ -301,9 +316,9 @@ def test_agent_instructions_require_pending_plan_for_generic_confirmation(monkey
     main_py = Path(__file__).resolve().parents[2] / "agent-framework-agent-with-foundry-toolbox-responses" / "main.py"
     text = main_py.read_text(encoding="utf-8")
     # New policy: ambiguous approval cases that must NOT authorize execution
-    assert "Do NOT treat any of the following as approval" in text
-    assert "Ambiguous statements such as" in text
-    assert "When approval is ambiguous" in text
+    assert "Do NOT treat the following as approval" in text
+    assert "generic \"okay\" or \"looks good\"" in text
+    assert "If the plan is ambiguous, ask the user to confirm the target version and scope and do not execute." in text
 
 
 def test_authorization_b_not_confirmed_blocks_before_write(monkeypatch):

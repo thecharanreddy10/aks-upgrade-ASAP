@@ -8,6 +8,9 @@ as tools are added.
 from __future__ import annotations
 
 import inspect
+import json
+import logging
+from functools import wraps
 from typing import Any, Callable, get_args, get_origin, get_type_hints
 
 from tools.cli_operations import aks_az_read, aks_az_write, aks_kubectl_read, aks_kubectl_write
@@ -55,7 +58,9 @@ from tools.validation import (
     aks_check_node_pool_surge,
 )
 
-ALL_TOOLS: tuple[Callable[..., dict[str, Any]], ...] = (
+logger = logging.getLogger(__name__)
+
+_REGISTERED_TOOLS: tuple[Callable[..., dict[str, Any]], ...] = (
     aks_get_cluster_details,
     aks_get_node_pools,
     aks_get_available_upgrades,
@@ -100,6 +105,45 @@ ALL_TOOLS: tuple[Callable[..., dict[str, Any]], ...] = (
     aks_check_priority_class,
     aks_check_service_ingress_urls,
 )
+
+
+def _instrument_tool(tool: Callable[..., dict[str, Any]]) -> Callable[..., dict[str, Any]]:
+    """Log bounded result metadata without logging the result body."""
+    @wraps(tool)
+    def instrumented(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        result = tool(*args, **kwargs)
+        try:
+            serialized = json.dumps(result, separators=(",", ":"), default=str)
+            result_chars = len(serialized)
+            result_bytes = len(serialized.encode("utf-8"))
+        except (TypeError, ValueError):
+            result_chars = 0
+            result_bytes = 0
+
+        truncated = bool(
+            isinstance(result, dict)
+            and any(result.get(key) for key in ("output_truncated", "details_truncated", "truncated"))
+        )
+        status = result.get("status") if isinstance(result, dict) else None
+        logger.info(
+            "tool_result tool=%s result_chars=%d result_bytes=%d estimated_tokens=%d status=%s truncated=%s",
+            tool.__name__,
+            result_chars,
+            result_bytes,
+            max(1, result_chars // 4) if result_chars else 0,
+            status or "unset",
+            truncated,
+        )
+        return result
+
+    return instrumented
+
+
+ALL_TOOLS: tuple[Callable[..., dict[str, Any]], ...] = tuple(
+    _instrument_tool(tool) for tool in _REGISTERED_TOOLS
+)
+
+logger.info("mcp_tool_baseline registered_tools=%d", len(ALL_TOOLS))
 
 _JSON_TYPES: dict[Any, str] = {str: "string", int: "integer", float: "number", bool: "boolean"}
 

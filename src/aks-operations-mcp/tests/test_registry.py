@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from tools.registry import ALL_TOOLS, build_input_schema, tool_description
+from tools.registry import ALL_TOOLS, _instrument_tool, build_input_schema, tool_description
 from tools.validation import aks_check_pdb, aks_check_pod_health
 
 
@@ -80,3 +80,19 @@ def test_generic_write_tool_schemas_do_not_expose_approval_token():
     assert set(schemas) == affected_tools
     for schema in schemas.values():
         assert "approval_token" not in schema["properties"]
+
+
+def test_tool_instrumentation_logs_metadata_without_result_body(caplog):
+    secret = "sensitive-result-value"
+
+    @_instrument_tool
+    def fake_tool() -> dict[str, str]:
+        return {"status": "WARNING", "secret": secret}
+
+    with caplog.at_level("INFO"):
+        result = fake_tool()
+
+    assert result["secret"] == secret
+    assert "tool_result tool=fake_tool" in caplog.text
+    assert "result_chars=" in caplog.text
+    assert secret not in caplog.text

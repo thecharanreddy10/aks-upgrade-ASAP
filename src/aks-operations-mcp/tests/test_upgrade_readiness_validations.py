@@ -232,10 +232,11 @@ def test_collect_pre_upgrade_inventory_reports_cluster_and_kubectl_facts(monkeyp
     assert result["inventory"]["nodes"]["total_nodes"] == 1
     assert result["inventory"]["pods"]["total_pods"] == 1
     assert result["inventory"]["helm"]["status"] == "REPORT"
-    assert result["inventory"]["nodes"]["items"][0]["name"] == "node-1"
+    assert result["inventory"]["nodes"]["ready_nodes"] == 1
+    assert result["inventory"]["nodes"]["items"] == []
     assert result["inventory"]["pods"]["unhealthy"] == []
     assert "status" not in result["inventory"]["pods"]["unhealthy"]
-    assert result["inventory"]["crds"]["items"][0]["name"] == "widgets.example.com"
+    assert result["inventory"]["crds"]["items"] == []
 
 
 def test_collect_pre_upgrade_inventory_marks_helm_query_failure(monkeypatch):
