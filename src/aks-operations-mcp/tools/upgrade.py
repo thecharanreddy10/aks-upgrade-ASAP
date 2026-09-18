@@ -12,6 +12,7 @@ from typing import Any, Callable
 from tools.common import get_container_service_client, run_kubectl_batch, run_kubectl_raw
 from tools.deprecated_apis import aks_check_deprecated_apis
 from tools.discovery import aks_get_available_upgrades, aks_get_cluster_details, aks_get_node_pools
+from tools.evidence import evidence_record, validate_prior_evidence
 from tools.storage import aks_check_storage
 from tools.validation import (
     aks_check_node_health,
@@ -380,6 +381,7 @@ def aks_execute_confirmed_upgrade(
         maintenance_window_end_utc=maintenance_window_end_utc,
         check_mode="full",
         target_kubernetes_version=target_kubernetes_version,
+        current_cluster_version=current_control_plane,
     )
     result["pre_execution_readiness"] = readiness
     if not readiness["readiness"]["is_ready"]:
@@ -955,9 +957,15 @@ def aks_plan_upgrade_preparation(
         maintenance_window_end_utc=maintenance_window_end_utc,
         check_mode="full",
         target_kubernetes_version=target_kubernetes_version,
+        current_cluster_version=control_plane_current,
     )
     blockers = list(readiness["readiness"].get("blockers", []))
     warnings = list(readiness["readiness"].get("warnings", []))
+    readiness_status = readiness.get("assessment_status") or readiness["readiness"].get("status")
+    if readiness_status == "INCOMPLETE":
+        return _preparation_result(
+            "incomplete", target_validation, current_state, pools, scope, sequence, blockers, warnings, readiness
+        )
     if control_plane_only_candidate:
         if insufficient_pools:
             warnings.append(
@@ -1054,6 +1062,7 @@ def _preparation_result(
 ) -> dict[str, Any]:
     return {
         "status": status,
+        "assessment_status": (readiness or {}).get("assessment_status") if readiness else None,
         "target_validation": target_validation,
         "current_cluster_state": current_state,
         "node_pools": node_pools,
@@ -1116,6 +1125,8 @@ def aks_validate_upgrade_readiness(
     maintenance_window_end_utc: str | None = None,
     check_mode: str = "quick",
     target_kubernetes_version: str | None = None,
+    current_cluster_version: str | None = None,
+    prior_evidence: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Run pre-upgrade health and safety checks.
 
@@ -1133,6 +1144,10 @@ def aks_validate_upgrade_readiness(
     storage_health: dict[str, Any] = {}
     deprecated_api_health: dict[str, Any] = {}
     deep_check_errors: list[str] = []
+    failed_checks: list[dict[str, str]] = []
+    current_evidence: list[dict[str, Any]] = []
+    prior_evidence_reused: list[dict[str, Any]] = []
+    rejected_prior_evidence: list[dict[str, Any]] = []
 
     blockers: list[str] = []
     warnings: list[str] = []
@@ -1171,6 +1186,15 @@ def aks_validate_upgrade_readiness(
                 ),
             ),
         ]
+        check_tools = {
+            "node_health": "aks_check_node_health",
+            "pod_health": "aks_check_pod_health",
+            "pdb_health": "aks_check_pdb",
+            "storage_health": "aks_check_storage",
+            "deprecated_api_health": "aks_check_deprecated_apis",
+        }
+        check_functions = {name: func for name, _error_label, func in checks}
+        retry_attempted: set[str] = set()
 
         results: dict[str, Any] = {}
         with ThreadPoolExecutor(max_workers=len(checks)) as executor:
@@ -1180,37 +1204,93 @@ def aks_validate_upgrade_readiness(
                 try:
                     results[name] = future.result()
                 except Exception as exc:  # noqa: BLE001
-                    deep_check_errors.append(f"{error_labels[name]}: {exc}")
+                    retry_attempted.add(name)
+                    try:
+                        retry_func = next(item[2] for item in checks if item[0] == name)
+                        results[name] = retry_func()
+                    except Exception as retry_exc:  # noqa: BLE001
+                        failed_checks.append({"check_type": name, "error": str(retry_exc)})
+                        deep_check_errors.append(f"{error_labels[name]}: {retry_exc}")
 
-        if "node_health" in results:
+            for name, tool_name in check_tools.items():
+                result = results.get(name)
+                unavailable = result is None or bool(result.get("query_errors")) or result.get("status") == "INCOMPLETE"
+                if unavailable and name not in retry_attempted:
+                    retry_attempted.add(name)
+                    try:
+                        results[name] = check_functions[name]()
+                        result = results[name]
+                        unavailable = result is None or bool(result.get("query_errors")) or result.get("status") == "INCOMPLETE"
+                    except Exception as retry_exc:  # noqa: BLE001
+                        failed_checks.append({"check_type": name, "error": str(retry_exc)})
+                        deep_check_errors.append(f"{error_labels[name]}: {retry_exc}")
+                        continue
+                if unavailable:
+                    failed_checks.append({"check_type": name, "error": "check_result_unavailable"})
+                    continue
+                current_evidence.append(
+                    evidence_record(
+                        check_type=name,
+                        cluster_name=cluster_name,
+                        cluster_version=current_cluster_version,
+                        source_tool=tool_name,
+                        scope=namespace or "all-namespaces",
+                        status="PASS",
+                        result=result,
+                    )
+                )
+
+        if "node_health" in results and not any(item["check_type"] == "node_health" for item in failed_checks):
             node_health = results["node_health"]
             if node_health.get("unhealthy_nodes"):
                 blockers.append("Unhealthy nodes detected.")
 
-        if "pod_health" in results:
+        if "pod_health" in results and not any(item["check_type"] == "pod_health" for item in failed_checks):
             pod_health = results["pod_health"]
             if pod_health.get("unhealthy_pods"):
                 blockers.append("Unhealthy pods detected.")
             elif pod_health.get("query_errors"):
                 blockers.append("Pod health could not be fully checked; query_errors present.")
 
-        if "pdb_health" in results:
+        if "pdb_health" in results and not any(item["check_type"] == "pdb_health" for item in failed_checks):
             pdb_health = results["pdb_health"]
             if not pdb_health.get("is_upgrade_safe", False):
                 blockers.append("PodDisruptionBudget constraints currently block disruption.")
 
-        if "storage_health" in results:
+        if "storage_health" in results and not any(item["check_type"] == "storage_health" for item in failed_checks):
             storage_health = results["storage_health"]
             blockers.extend(storage_health.get("blockers", []))
             warnings.extend(storage_health.get("warnings", []))
 
-        if "deprecated_api_health" in results:
+        if "deprecated_api_health" in results and not any(item["check_type"] == "deprecated_api_health" for item in failed_checks):
             deprecated_api_health = results["deprecated_api_health"]
             blockers.extend(deprecated_api_health.get("blockers", []))
             warnings.extend(deprecated_api_health.get("warnings", []))
 
-        if deep_check_errors:
-            blockers.append("One or more deep checks failed to execute.")
+        if prior_evidence:
+            current_types = {item["check_type"] for item in current_evidence}
+            for evidence in prior_evidence:
+                if evidence.get("check_type") in current_types:
+                    continue
+                valid, reason = validate_prior_evidence(
+                    evidence,
+                    cluster_name=cluster_name,
+                    cluster_version=current_cluster_version,
+                    scope=namespace or "all-namespaces",
+                )
+                if valid:
+                    prior_evidence_reused.append(evidence)
+                    results[evidence["check_type"]] = evidence.get("result", {})
+                else:
+                    rejected_prior_evidence.append({"evidence_id": evidence.get("evidence_id"), "reason": reason})
+
+        if failed_checks and prior_evidence:
+            for failure in list(failed_checks):
+                matching = next((item for item in prior_evidence if item.get("check_type") == failure["check_type"]), None)
+                if matching and any(item.get("evidence_id") == matching.get("evidence_id") for item in prior_evidence_reused):
+                    failed_checks.remove(failure)
+        if failed_checks:
+            deep_check_errors.append("One or more mandatory checks were unavailable after one retry.")
     else:
         warnings.append("Deep health checks were skipped in quick mode.")
 
@@ -1219,6 +1299,15 @@ def aks_validate_upgrade_readiness(
         in_window = _is_within_maintenance_window(maintenance_window_start_utc, maintenance_window_end_utc)
         if not in_window:
             blockers.append("Current UTC time is outside the configured maintenance window.")
+
+    if failed_checks:
+        assessment_status = "INCOMPLETE"
+    elif blockers:
+        assessment_status = "BLOCKED"
+    elif warnings:
+        assessment_status = "WARNING"
+    else:
+        assessment_status = "READY"
 
     return {
         "subscription_id": subscription_id,
@@ -1232,11 +1321,20 @@ def aks_validate_upgrade_readiness(
             "in_window": in_window,
         },
         "readiness": {
-            "is_ready": len(blockers) == 0,
+            "is_ready": assessment_status in {"READY", "WARNING"},
+            "status": assessment_status,
             "blockers": blockers,
             "warnings": warnings,
         },
         "deep_check_errors": deep_check_errors,
+        "assessment_status": assessment_status,
+        "current_evidence": current_evidence,
+        "prior_evidence_reused": prior_evidence_reused,
+        "rejected_prior_evidence": rejected_prior_evidence,
+        "failed_unavailable_checks": failed_checks,
+        "validity_decision": (
+            "Current evidence was used for checks collected in this run; prior evidence was reused only when all deterministic validity conditions passed."
+        ),
         "node_health": node_health,
         "pod_health": pod_health,
         "pdb_health": pdb_health,
