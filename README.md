@@ -91,6 +91,12 @@ The asynchronous design was introduced specifically to avoid keeping an MCP requ
 
 Before any write is considered, the agent operates strictly in a read-only assessment mode: gathering cluster/node-pool state, authoritative Azure upgrade-profile data, and mandatory readiness results. No write tool is invoked during assessment.
 
+### Readiness Orchestration
+
+For an upgrade-readiness or detailed assessment request, the agent calls `aks_validate_upgrade_readiness` once with `check_mode="full"`. That result is authoritative for the current run. The aggregator executes the five mandatory checks and returns `READY`, `BLOCKED`, `WARNING`, or `INCOMPLETE` based only on current evidence; unavailable mandatory checks receive one bounded retry and are not replaced with historical results.
+
+After a `READY` result, the agent gathers only the current Kubernetes version, available upgrade versions, and node-pool information needed for a future plan. It waits for the user to choose the target version and scope before generating an exact plan. Optional checks such as operator, RBAC/API, platform/add-on, replica, surge, PriorityClass, and inventory checks are not run merely because a report is described as detailed.
+
 ## Upgrade Readiness Checks
 
 The POC treats these as **mandatory** upgrade-readiness checks that must pass (or have their blockers surfaced) before upgrade execution:
@@ -190,6 +196,14 @@ After a control-plane or node-pool stage reaches `Succeeded`, the agent verifies
 
 - **Agent:** Foundry hosted agent, connected to the configured Foundry Toolbox (`agent-tools`), using `FoundryChatClient` over the Responses protocol.
 - **MCP:** AKS Operations MCP server hosted in Azure Container Apps, reached by the agent via the toolbox's MCP endpoint (`TOOLBOX_ENDPOINT`) or directly via `AKS_MCP_ENDPOINT`.
+
+The hosted Agent and the MCP Container App are separate deployment boundaries. `azure.yaml` declares the hosted Agent service and Foundry project; the MCP Container App is published independently through its container image workflow. For an Agent-only code change, use the service-qualified AZD command rather than the all-services form:
+
+```powershell
+azd deploy agent-framework-agent-with-foundry-toolbox-responses --environment <environment> --no-prompt
+```
+
+This updates the hosted Agent version without recreating the existing Toolbox or MCP Container App.
 
 The agent uses `FoundryChatClient` from the Agent Framework to create an OpenAI-compatible Responses client. It connects to the toolbox's MCP endpoint via `FoundryToolbox` â€” a thin convenience wrapper over `MCPStreamableHTTPTool` that authenticates every request with the credential and forwards the platform per-request call-id â€” which discovers and invokes the toolbox's tools over MCP at runtime. `FoundryToolbox` resolves the endpoint from the `TOOLBOX_ENDPOINT` environment variable. If that variable isn't set, it builds the endpoint from `FOUNDRY_PROJECT_ENDPOINT` and `TOOLBOX_NAME`.
 

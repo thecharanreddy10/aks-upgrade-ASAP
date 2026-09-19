@@ -126,6 +126,19 @@ def test_invalid_scope_is_blocked_without_write(monkeypatch):
     assert client.agent_pools.writes == []
 
 
+def test_unconfirmed_execution_is_blocked_without_write(monkeypatch):
+    cluster = _cluster("1.35.1", "Succeeded")
+    pool = _pool()
+    client, _ = _wire(monkeypatch, cluster, pool)
+
+    result = async_upgrade.aks_execute_confirmed_upgrade(*ARGS, TARGET, confirmed_scope="control_plane_only")
+
+    assert result["status"] == "blocked"
+    assert result["reason_code"] == "EXECUTION_CONFIRMATION_REQUIRED"
+    assert result["blocked_stage"] == "authorization"
+    assert client.managed_clusters.writes == []
+
+
 def test_concurrent_same_execution_submits_only_one_write(monkeypatch):
     cluster = _cluster("1.35.1", "Succeeded")
     pool = _pool()
@@ -145,12 +158,14 @@ def test_concurrent_same_execution_submits_only_one_write(monkeypatch):
             *ARGS,
             TARGET,
             confirmed_scope="control_plane_only",
+            is_user_confirmed=True,
         )
         assert readiness_started.wait(timeout=5)
         second = async_upgrade.aks_execute_confirmed_upgrade(
             *ARGS,
             TARGET,
             confirmed_scope="control_plane_only",
+            is_user_confirmed=True,
         )
         release_readiness.set()
         first = first_future.result(timeout=5)
@@ -166,7 +181,7 @@ def test_control_plane_submission_returns_without_waiting(monkeypatch):
     pool = _pool()
     client, _ = _wire(monkeypatch, cluster, pool)
 
-    result = async_upgrade.aks_execute_confirmed_upgrade(*ARGS, TARGET, confirmed_scope="control_plane_only")
+    result = async_upgrade.aks_execute_confirmed_upgrade(*ARGS, TARGET, confirmed_scope="control_plane_only", is_user_confirmed=True)
 
     assert result["status"] == "in_progress"
     assert result["reason_code"] == "CONTROL_PLANE_UPGRADE_STARTED"
@@ -182,7 +197,7 @@ def test_existing_control_plane_operation_is_not_duplicated(monkeypatch):
     pool = _pool()
     client, _ = _wire(monkeypatch, cluster, pool)
 
-    result = async_upgrade.aks_execute_confirmed_upgrade(*ARGS, TARGET, confirmed_scope="control_plane_only")
+    result = async_upgrade.aks_execute_confirmed_upgrade(*ARGS, TARGET, confirmed_scope="control_plane_only", is_user_confirmed=True)
 
     assert result["status"] == "in_progress"
     assert result["reason_code"] == "CONTROL_PLANE_ALREADY_IN_PROGRESS"
@@ -195,7 +210,7 @@ def test_failed_control_plane_operation_is_not_retried(monkeypatch):
     pool = _pool()
     client, _ = _wire(monkeypatch, cluster, pool)
 
-    result = async_upgrade.aks_execute_confirmed_upgrade(*ARGS, TARGET, confirmed_scope="control_plane_only")
+    result = async_upgrade.aks_execute_confirmed_upgrade(*ARGS, TARGET, confirmed_scope="control_plane_only", is_user_confirmed=True)
 
     assert result["status"] == "failed"
     assert result["reason_code"] == "CONTROL_PLANE_OPERATION_TERMINAL_FAILURE"
@@ -208,7 +223,7 @@ def test_control_plane_only_does_not_require_node_pool_target(monkeypatch):
     pool = _pool("nodepool1", "1.35.1", "Succeeded")
     _wire(monkeypatch, cluster, pool)
 
-    result = async_upgrade.aks_execute_confirmed_upgrade(*ARGS, TARGET, confirmed_scope="control_plane_only")
+    result = async_upgrade.aks_execute_confirmed_upgrade(*ARGS, TARGET, confirmed_scope="control_plane_only", is_user_confirmed=True)
 
     assert result["status"] == "completed"
     assert result["reason_code"] == "CONTROL_PLANE_ONLY_SCOPE"
@@ -222,7 +237,7 @@ def test_node_pool_submission_returns_without_waiting(monkeypatch):
     pool = _pool("nodepool1", "1.35.1", "Succeeded")
     client, _ = _wire(monkeypatch, cluster, pool, pool_supported=True)
 
-    result = async_upgrade.aks_execute_confirmed_upgrade(*ARGS, TARGET, confirmed_scope="complete_cluster")
+    result = async_upgrade.aks_execute_confirmed_upgrade(*ARGS, TARGET, confirmed_scope="complete_cluster", is_user_confirmed=True)
 
     assert result["status"] == "in_progress"
     assert result["reason_code"] == "NODE_POOL_UPGRADE_STARTED"
@@ -235,7 +250,7 @@ def test_node_pool_in_progress_is_not_duplicated(monkeypatch):
     pool = _pool("nodepool1", "1.35.1", "Updating")
     client, _ = _wire(monkeypatch, cluster, pool, pool_supported=True)
 
-    result = async_upgrade.aks_execute_confirmed_upgrade(*ARGS, TARGET, confirmed_scope="complete_cluster")
+    result = async_upgrade.aks_execute_confirmed_upgrade(*ARGS, TARGET, confirmed_scope="complete_cluster", is_user_confirmed=True)
 
     assert result["status"] == "in_progress"
     assert result["reason_code"] == "NODE_POOL_ALREADY_IN_PROGRESS"
@@ -248,7 +263,7 @@ def test_failed_node_pool_operation_is_not_retried(monkeypatch, terminal_state):
     pool = _pool("nodepool1", "1.35.1", terminal_state)
     client, _ = _wire(monkeypatch, cluster, pool, pool_supported=True)
 
-    result = async_upgrade.aks_execute_confirmed_upgrade(*ARGS, TARGET, confirmed_scope="complete_cluster")
+    result = async_upgrade.aks_execute_confirmed_upgrade(*ARGS, TARGET, confirmed_scope="complete_cluster", is_user_confirmed=True)
 
     assert result["status"] == "partial"
     assert result["reason_code"] == "NODE_POOL_OPERATION_TERMINAL_FAILURE"
@@ -260,7 +275,7 @@ def test_insufficient_node_pool_evidence_returns_partial_without_write(monkeypat
     pool = _pool("nodepool1", "1.35.1", "Succeeded")
     client, _ = _wire(monkeypatch, cluster, pool, pool_supported=False)
 
-    result = async_upgrade.aks_execute_confirmed_upgrade(*ARGS, TARGET, confirmed_scope="complete_cluster")
+    result = async_upgrade.aks_execute_confirmed_upgrade(*ARGS, TARGET, confirmed_scope="complete_cluster", is_user_confirmed=True)
 
     assert result["status"] == "partial"
     assert result["reason_code"] == "NODE_POOL_PROFILE_INSUFFICIENT"
@@ -283,7 +298,7 @@ def test_live_node_pool_target_prevents_redundant_write_when_discovery_is_stale(
         },
     )
 
-    result = async_upgrade.aks_execute_confirmed_upgrade(*ARGS, TARGET, confirmed_scope="complete_cluster")
+    result = async_upgrade.aks_execute_confirmed_upgrade(*ARGS, TARGET, confirmed_scope="complete_cluster", is_user_confirmed=True)
 
     assert result["status"] == "completed"
     assert result["reason_code"] == "UPGRADE_COMPLETED"
@@ -295,7 +310,7 @@ def test_complete_cluster_advances_and_finishes_after_node_pool_reaches_target(m
     pool = _pool("nodepool1", "1.35.1", "Succeeded")
     client, _ = _wire(monkeypatch, cluster, pool, pool_supported=True)
 
-    first = async_upgrade.aks_execute_confirmed_upgrade(*ARGS, TARGET, confirmed_scope="complete_cluster")
+    first = async_upgrade.aks_execute_confirmed_upgrade(*ARGS, TARGET, confirmed_scope="complete_cluster", is_user_confirmed=True)
     assert first["status"] == "in_progress"
     assert first["reason_code"] == "NODE_POOL_UPGRADE_STARTED"
     assert len(client.agent_pools.writes) == 1
@@ -304,7 +319,7 @@ def test_complete_cluster_advances_and_finishes_after_node_pool_reaches_target(m
     pool.current_orchestrator_version = TARGET
     pool.provisioning_state = "Succeeded"
 
-    final = async_upgrade.aks_execute_confirmed_upgrade(*ARGS, TARGET, confirmed_scope="complete_cluster")
+    final = async_upgrade.aks_execute_confirmed_upgrade(*ARGS, TARGET, confirmed_scope="complete_cluster", is_user_confirmed=True)
     assert final["status"] == "completed"
     assert final["reason_code"] == "UPGRADE_COMPLETED"
     assert len(client.agent_pools.writes) == 1
@@ -336,7 +351,7 @@ def test_node_pool_smoke_failure_blocks_completion(monkeypatch):
 
     monkeypatch.setattr(async_upgrade.sync_upgrade, "aks_run_post_upgrade_smoke_checks", smoke)
 
-    result = async_upgrade.aks_execute_confirmed_upgrade(*ARGS, TARGET, confirmed_scope="complete_cluster")
+    result = async_upgrade.aks_execute_confirmed_upgrade(*ARGS, TARGET, confirmed_scope="complete_cluster", is_user_confirmed=True)
 
     assert result["status"] == "partial"
     assert result["reason_code"] == "POST_UPGRADE_SMOKE_CHECKS_FAILED"

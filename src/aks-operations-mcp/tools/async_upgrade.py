@@ -26,6 +26,7 @@ def aks_execute_confirmed_upgrade(
     maintenance_window_end_utc: str | None = None,
     check_mode: str = "full",
     confirmed_scope: str = "complete_cluster",
+    is_user_confirmed: bool = False,
 ) -> dict[str, Any]:
     """Validate scope and coordinate one active execution for this target and scope."""
     result = _result(target_kubernetes_version, confirmed_scope)
@@ -37,6 +38,9 @@ def aks_execute_confirmed_upgrade(
             "INVALID_EXECUTION_SCOPE",
             "scope_validation",
         )
+    if not is_user_confirmed:
+        message = "Upgrade execution requires explicit user confirmation (is_user_confirmed=True)."
+        return _finish(result, "blocked", message, "EXECUTION_CONFIRMATION_REQUIRED", "authorization")
 
     execution_key = (
         subscription_id,

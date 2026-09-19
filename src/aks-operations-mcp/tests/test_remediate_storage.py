@@ -96,6 +96,21 @@ def test_remediate_storage_pv_rejects_unsafe_pv_name(monkeypatch):
         )
 
 
+def test_remediate_storage_pv_requires_destructive_confirmation(monkeypatch):
+    monkeypatch.setattr(remediate_storage, "run_kubectl_json", lambda *_a, **_k: {
+        "items": [{"metadata": {"name": "released-pv"}, "status": {"phase": "Released"}, "spec": {}}]
+    })
+    monkeypatch.setenv("AKS_REMEDIATION_ENABLE_WRITE", "true")
+
+    with pytest.raises(PermissionError, match="permanently deletes"):
+        aks_remediate_storage(
+            *CLUSTER_ARGS,
+            strategy="cleanup_pv",
+            dry_run=False,
+            check_mode="full",
+        )
+
+
 def test_plan_cleanup_pvc_no_pvcs_returns_no_action(monkeypatch):
     monkeypatch.setattr(remediate_storage, "run_kubectl_json", lambda *_a, **_k: {"items": []})
 

@@ -31,3 +31,13 @@ def test_crd_planner_blocks_invalid_conversion_webhook(monkeypatch):
 
     assert result["status"] == "BLOCKED"
     assert result["blockers"]
+
+
+def test_crd_planner_reports_query_failure_as_incomplete(monkeypatch):
+    monkeypatch.setattr(remediate_crds, "run_kubectl_batch", lambda *_a, **_k: {"crds": (1, ""), "apiservices": (0, '{"items":[]}')})
+
+    result = remediate_crds.aks_plan_crd_conversion(*ARGS, crd_name="widgets.example.com")
+
+    assert result["status"] == "INCOMPLETE"
+    assert result["writes_performed"] is False
+    assert result["query_errors"]

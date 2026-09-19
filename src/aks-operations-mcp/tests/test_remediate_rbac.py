@@ -41,6 +41,21 @@ def test_rbac_planner_rejects_broad_permissions():
         raise AssertionError("Expected broad RBAC permission to be rejected")
 
 
+def test_rbac_planner_rejects_shell_unsafe_resource_tokens():
+    try:
+        remediate_rbac.aks_plan_rbac_remediation(
+            *ARGS,
+            namespace="phonebook",
+            service_account="api",
+            role_name="api-read",
+            resources=["pods; echo compromised"],
+            verbs=["get"],
+        )
+    except ValueError:
+        return
+    raise AssertionError("Expected shell-unsafe RBAC resource to be rejected")
+
+
 def test_rbac_apply_defaults_to_dry_run(monkeypatch):
     monkeypatch.setattr(remediate_rbac, "run_kubectl_raw", lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("write must not run")))
 

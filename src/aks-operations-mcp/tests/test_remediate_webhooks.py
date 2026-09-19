@@ -33,3 +33,13 @@ def test_webhook_planner_blocks_missing_ca_bundle(monkeypatch):
 
     assert result["status"] == "BLOCKED"
     assert result["blockers"]
+
+
+def test_webhook_planner_reports_query_failure_as_incomplete(monkeypatch):
+    monkeypatch.setattr(remediate_webhooks, "run_kubectl_batch", lambda *_a, **_k: {"validating": (1, "")})
+
+    result = remediate_webhooks.aks_plan_webhook_remediation(*ARGS, "policy")
+
+    assert result["status"] == "INCOMPLETE"
+    assert result["writes_performed"] is False
+    assert result["query_errors"]

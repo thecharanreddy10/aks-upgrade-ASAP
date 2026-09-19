@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from tools.common import (
@@ -15,6 +16,7 @@ from tools.common import (
 
 _ALLOWED_VERBS = {"get", "list", "watch", "create", "update", "patch", "delete"}
 _BLOCKED_ROLES = {"cluster-admin", "admin"}
+_RESOURCE_RE = re.compile(r"^[a-z0-9][a-z0-9.-]*(/[a-z0-9][a-z0-9.-]*)?$")
 
 
 def _validate_plan_scope(namespace: str, service_account: str, role_name: str, resources: list[str], verbs: list[str]) -> None:
@@ -22,8 +24,8 @@ def _validate_plan_scope(namespace: str, service_account: str, role_name: str, r
     assert_namespace_not_protected(namespace)
     validate_k8s_name(service_account, "service account")
     validate_k8s_name(role_name, "role")
-    if not resources or not all(isinstance(item, str) and item.strip() for item in resources):
-        raise ValueError("resources must contain at least one non-empty resource name.")
+    if not resources or not all(isinstance(item, str) and _RESOURCE_RE.fullmatch(item) for item in resources):
+        raise ValueError("resources must contain valid Kubernetes resource names.")
     if not verbs or not set(verbs) <= _ALLOWED_VERBS:
         raise ValueError(f"verbs must be selected from {sorted(_ALLOWED_VERBS)}.")
     if role_name.lower() in _BLOCKED_ROLES or "*" in resources or "*" in verbs:

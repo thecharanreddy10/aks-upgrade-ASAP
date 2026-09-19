@@ -8,14 +8,14 @@ from typing import Any
 from tools.common import run_kubectl_batch, validate_k8s_name, validate_namespace
 
 
-def _parse(batch: dict[str, tuple[int, str]], label: str) -> list[dict[str, Any]]:
+def _parse(batch: dict[str, tuple[int, str]], label: str) -> tuple[list[dict[str, Any]], list[str]]:
     exit_code, raw = batch.get(label, (1, ""))
     if exit_code != 0 or not raw.strip():
-        return []
+        return [], [f"{label}: kubectl query failed or returned empty output."]
     try:
-        return json.loads(raw, strict=False).get("items", [])
-    except json.JSONDecodeError:
-        return []
+        return json.loads(raw, strict=False).get("items", []), []
+    except json.JSONDecodeError as exc:
+        return [], [f"{label}: invalid JSON output: {exc}"]
 
 
 def aks_plan_webhook_remediation(
@@ -43,7 +43,21 @@ def aks_plan_webhook_remediation(
         },
     )
 
-    configurations = _parse(batch, "validating") + _parse(batch, "mutating")
+    validating, validating_errors = _parse(batch, "validating")
+    mutating, mutating_errors = _parse(batch, "mutating")
+    services, service_errors = _parse(batch, "services")
+    endpoints, endpoint_errors = _parse(batch, "endpoints")
+    secrets, secret_errors = _parse(batch, "secrets")
+    query_errors = validating_errors + mutating_errors + service_errors + endpoint_errors + secret_errors
+    if query_errors:
+        return {
+            "status": "INCOMPLETE",
+            "webhook_name": webhook_name,
+            "writes_performed": False,
+            "query_errors": query_errors,
+            "message": "Webhook remediation evidence could not be fully collected.",
+        }
+    configurations = validating + mutating
     matches = [item for item in configurations if item.get("metadata", {}).get("name") == webhook_name]
     if not matches:
         return {
@@ -73,9 +87,6 @@ def aks_plan_webhook_remediation(
                 "failure_policy": webhook.get("failurePolicy"),
             })
 
-    services = _parse(batch, "services")
-    endpoints = _parse(batch, "endpoints")
-    secrets = _parse(batch, "secrets")
     service_findings = [
         {
             "namespace": item.get("metadata", {}).get("namespace"),

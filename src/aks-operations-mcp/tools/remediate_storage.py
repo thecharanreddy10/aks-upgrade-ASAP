@@ -32,6 +32,7 @@ def aks_remediate_storage(
     strategy: str = "cleanup_pvc",
     dry_run: bool = True,
     check_mode: str = "quick",
+    confirm_destructive: bool = False,
 ) -> dict[str, Any]:
     """Execute a storage remediation plan to unblock upgrade-readiness issues."""
     if strategy not in ("cleanup_pvc", "cleanup_pv"):
@@ -63,7 +64,12 @@ def aks_remediate_storage(
             "message": "Plan only; no cluster changes. Pass dry_run=False to apply.",
         }
 
-    require_remediation_approval(check_mode, namespace=namespace)
+    require_remediation_approval(
+        check_mode,
+        namespace=namespace,
+        is_destructive=strategy == "cleanup_pv",
+        confirm_destructive=confirm_destructive,
+    )
 
     return _apply_plan(
         subscription_id,

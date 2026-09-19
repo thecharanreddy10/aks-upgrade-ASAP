@@ -178,7 +178,7 @@ def aks_check_upgrade_compatibility(
     if query_errors:
         warnings.append("Some compatibility queries could not be completed.")
 
-    status = "BLOCKED" if blockers else ("INCOMPLETE" if query_errors and not warnings else ("WARNING" if warnings else "PASS"))
+    status = "BLOCKED" if blockers else ("INCOMPLETE" if query_errors else ("WARNING" if warnings else "PASS"))
     problematic_nodes = [
         item for item in node_findings
         if not item["ready"] or any(

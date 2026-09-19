@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from types import SimpleNamespace
 
 from tools import upgrade, validation
@@ -186,6 +187,93 @@ def test_post_upgrade_smoke_checks_block_on_node_pool_version_mismatch(monkeypat
     assert result["status"] == "BLOCKED"
     assert result["version_checks"][0]["status"] == "BLOCKED"
     assert "node_pool 'userpool'" in result["blockers"][0]
+
+
+def test_post_upgrade_smoke_checks_use_fresh_readiness(monkeypatch):
+    readiness_calls = []
+    readiness_results = [
+        {"assessment_status": "READY", "readiness": {"is_ready": True, "blockers": [], "warnings": []}},
+        {"assessment_status": "INCOMPLETE", "readiness": {"is_ready": False, "blockers": [], "warnings": []}},
+    ]
+    monkeypatch.setattr(
+        upgrade,
+        "aks_get_upgrade_execution_status",
+        lambda *_a: {
+            "cluster": {
+                "current_kubernetes_version": "1.30.1",
+                "kubernetes_version": "1.30.1",
+                "provisioning_state": "Succeeded",
+            },
+            "node_pools": [],
+        },
+    )
+
+    def fresh_readiness(*_args, **_kwargs):
+        readiness_calls.append(_kwargs)
+        return readiness_results.pop(0)
+
+    monkeypatch.setattr(upgrade, "aks_validate_upgrade_readiness", fresh_readiness)
+
+    pre_upgrade = upgrade.aks_validate_upgrade_readiness(*CLUSTER_ARGS, check_mode="full")
+    result = upgrade.aks_run_post_upgrade_smoke_checks(
+        *CLUSTER_ARGS,
+        "1.30.1",
+        stage="control_plane",
+    )
+
+    assert pre_upgrade["assessment_status"] == "READY"
+    assert len(readiness_calls) == 2
+    assert result["readiness"]["assessment_status"] == "INCOMPLETE"
+    assert result["status"] == "INCOMPLETE"
+
+
+def test_post_upgrade_smoke_checks_propagate_real_readiness_blocker(monkeypatch):
+    monkeypatch.setattr(
+        upgrade,
+        "aks_get_upgrade_execution_status",
+        lambda *_a: {
+            "cluster": {"current_kubernetes_version": "1.30.1", "provisioning_state": "Succeeded"},
+            "node_pools": [],
+        },
+    )
+    monkeypatch.setattr(
+        upgrade,
+        "aks_validate_upgrade_readiness",
+        lambda *_a, **_k: {
+            "assessment_status": "BLOCKED",
+            "readiness": {"status": "BLOCKED", "is_ready": False, "blockers": ["PDB blocked"], "warnings": []},
+        },
+    )
+
+    result = upgrade.aks_run_post_upgrade_smoke_checks(*CLUSTER_ARGS, "1.30.1", stage="control_plane")
+
+    assert result["status"] == "BLOCKED"
+    assert result["blockers"] == ["PDB blocked"]
+
+
+def test_post_upgrade_smoke_checks_preserve_readiness_warning(monkeypatch):
+    monkeypatch.setattr(
+        upgrade,
+        "aks_get_upgrade_execution_status",
+        lambda *_a: {
+            "cluster": {"current_kubernetes_version": "1.30.1", "provisioning_state": "Succeeded"},
+            "node_pools": [],
+        },
+    )
+    monkeypatch.setattr(
+        upgrade,
+        "aks_validate_upgrade_readiness",
+        lambda *_a, **_k: {
+            "assessment_status": "WARNING",
+            "readiness": {"status": "WARNING", "is_ready": True, "blockers": [], "warnings": ["watch storage"]},
+        },
+    )
+
+    result = upgrade.aks_run_post_upgrade_smoke_checks(*CLUSTER_ARGS, "1.30.1", stage="control_plane")
+
+    assert result["status"] == "WARNING"
+    assert result["blockers"] == []
+    assert result["warnings"] == ["watch storage"]
 
 
 def test_collect_pre_upgrade_inventory_reports_cluster_and_kubectl_facts(monkeypatch):
@@ -573,3 +661,27 @@ def test_validate_upgrade_readiness_runs_only_mandatory_checks(monkeypatch):
         "node_pool_surge_health",
         "priority_class_health",
     ))
+
+
+def test_validate_upgrade_readiness_public_contract_is_current_run_only(monkeypatch):
+    healthy = {"unhealthy_nodes": []}
+    pod_health = {"unhealthy_pods": [], "query_errors": []}
+    pdb_health = {"is_upgrade_safe": True}
+    storage_health = {"blockers": [], "warnings": []}
+    deprecated_health = {"blockers": [], "warnings": []}
+    monkeypatch.setattr(upgrade, "aks_check_node_health", lambda *_a, **_k: healthy)
+    monkeypatch.setattr(upgrade, "aks_check_pod_health", lambda *_a, **_k: pod_health)
+    monkeypatch.setattr(upgrade, "aks_check_pdb", lambda *_a, **_k: pdb_health)
+    monkeypatch.setattr(upgrade, "aks_check_storage", lambda *_a, **_k: storage_health)
+    monkeypatch.setattr(upgrade, "aks_check_deprecated_apis", lambda *_a, **_k: deprecated_health)
+
+    parameters = inspect.signature(upgrade.aks_validate_upgrade_readiness).parameters
+    result = upgrade.aks_validate_upgrade_readiness(*CLUSTER_ARGS, check_mode="full")
+
+    assert parameters["target_kubernetes_version"].default is None
+    assert "prior_evidence" not in parameters
+    assert "prior_evidence_reused" not in result
+    assert "rejected_prior_evidence" not in result
+    assert len(result["current_evidence"]) == 5
+    assert all(item["evidence_id"].startswith("EV-") for item in result["current_evidence"])
+    assert all(item["timestamp"] == item["last_verified_at"] for item in result["current_evidence"])

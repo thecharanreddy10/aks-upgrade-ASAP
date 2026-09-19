@@ -8,14 +8,14 @@ from typing import Any
 from tools.common import run_kubectl_batch, validate_k8s_name
 
 
-def _items(batch: dict[str, tuple[int, str]], label: str) -> list[dict[str, Any]]:
+def _items(batch: dict[str, tuple[int, str]], label: str) -> tuple[list[dict[str, Any]], list[str]]:
     exit_code, raw = batch.get(label, (1, ""))
     if exit_code != 0 or not raw.strip():
-        return []
+        return [], [f"{label}: kubectl query failed or returned empty output."]
     try:
-        return json.loads(raw, strict=False).get("items", [])
-    except json.JSONDecodeError:
-        return []
+        return json.loads(raw, strict=False).get("items", []), []
+    except json.JSONDecodeError as exc:
+        return [], [f"{label}: invalid JSON output: {exc}"]
 
 
 def aks_plan_crd_conversion(
@@ -36,7 +36,18 @@ def aks_plan_crd_conversion(
             "apiservices": "get apiservice",
         },
     )
-    crds = [item for item in _items(batch, "crds") if item.get("metadata", {}).get("name") == crd_name]
+    crd_items, query_errors = _items(batch, "crds")
+    _api_items, api_errors = _items(batch, "apiservices")
+    query_errors.extend(api_errors)
+    if query_errors:
+        return {
+            "status": "INCOMPLETE",
+            "crd_name": crd_name,
+            "writes_performed": False,
+            "query_errors": query_errors,
+            "message": "CRD conversion evidence could not be fully collected.",
+        }
+    crds = [item for item in crd_items if item.get("metadata", {}).get("name") == crd_name]
     if not crds:
         return {
             "status": "NOT_FOUND",

@@ -12,7 +12,7 @@ from typing import Any, Callable
 from tools.common import get_container_service_client, run_kubectl_batch, run_kubectl_raw
 from tools.deprecated_apis import aks_check_deprecated_apis
 from tools.discovery import aks_get_available_upgrades, aks_get_cluster_details, aks_get_node_pools
-from tools.evidence import evidence_record, validate_prior_evidence
+from tools.evidence import evidence_record
 from tools.storage import aks_check_storage
 from tools.validation import (
     aks_check_node_health,
@@ -381,7 +381,6 @@ def aks_execute_confirmed_upgrade(
         maintenance_window_end_utc=maintenance_window_end_utc,
         check_mode="full",
         target_kubernetes_version=target_kubernetes_version,
-        current_cluster_version=current_control_plane,
     )
     result["pre_execution_readiness"] = readiness
     if not readiness["readiness"]["is_ready"]:
@@ -772,6 +771,22 @@ def aks_run_post_upgrade_smoke_checks(
         check_mode="full",
         target_kubernetes_version=target_kubernetes_version,
     )
+    readiness_status = readiness.get("assessment_status") or readiness.get("readiness", {}).get("status")
+    if readiness_status == "INCOMPLETE":
+        return {
+            "subscription_id": subscription_id,
+            "resource_group": resource_group,
+            "cluster_name": cluster_name,
+            "target_kubernetes_version": target_kubernetes_version,
+            "stage": stage,
+            "node_pool_name": node_pool_name,
+            "namespace": namespace or "all-namespaces",
+            "status": "INCOMPLETE",
+            "version_checks": version_checks,
+            "readiness": readiness,
+            "blockers": list(readiness.get("readiness", {}).get("blockers", [])),
+            "warnings": list(readiness.get("readiness", {}).get("warnings", [])),
+        }
     blockers = [
         f"{item['resource_type']} '{item['name']}' is not at target with Succeeded provisioning state."
         for item in version_checks
@@ -779,6 +794,7 @@ def aks_run_post_upgrade_smoke_checks(
     ]
     blockers.extend(readiness.get("readiness", {}).get("blockers", []))
     warnings = list(readiness.get("readiness", {}).get("warnings", []))
+    status = "BLOCKED" if blockers else ("WARNING" if readiness_status == "WARNING" or warnings else "PASS")
 
     return {
         "subscription_id": subscription_id,
@@ -788,7 +804,7 @@ def aks_run_post_upgrade_smoke_checks(
         "stage": stage,
         "node_pool_name": node_pool_name,
         "namespace": namespace or "all-namespaces",
-        "status": "PASS" if not blockers else "BLOCKED",
+        "status": status,
         "version_checks": version_checks,
         "readiness": readiness,
         "blockers": blockers,
@@ -957,7 +973,6 @@ def aks_plan_upgrade_preparation(
         maintenance_window_end_utc=maintenance_window_end_utc,
         check_mode="full",
         target_kubernetes_version=target_kubernetes_version,
-        current_cluster_version=control_plane_current,
     )
     blockers = list(readiness["readiness"].get("blockers", []))
     warnings = list(readiness["readiness"].get("warnings", []))
@@ -1125,8 +1140,6 @@ def aks_validate_upgrade_readiness(
     maintenance_window_end_utc: str | None = None,
     check_mode: str = "quick",
     target_kubernetes_version: str | None = None,
-    current_cluster_version: str | None = None,
-    prior_evidence: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Run pre-upgrade health and safety checks.
 
@@ -1146,8 +1159,6 @@ def aks_validate_upgrade_readiness(
     deep_check_errors: list[str] = []
     failed_checks: list[dict[str, str]] = []
     current_evidence: list[dict[str, Any]] = []
-    prior_evidence_reused: list[dict[str, Any]] = []
-    rejected_prior_evidence: list[dict[str, Any]] = []
 
     blockers: list[str] = []
     warnings: list[str] = []
@@ -1232,7 +1243,7 @@ def aks_validate_upgrade_readiness(
                     evidence_record(
                         check_type=name,
                         cluster_name=cluster_name,
-                        cluster_version=current_cluster_version,
+                        cluster_version=None,
                         source_tool=tool_name,
                         scope=namespace or "all-namespaces",
                         status="PASS",
@@ -1267,28 +1278,6 @@ def aks_validate_upgrade_readiness(
             blockers.extend(deprecated_api_health.get("blockers", []))
             warnings.extend(deprecated_api_health.get("warnings", []))
 
-        if prior_evidence:
-            current_types = {item["check_type"] for item in current_evidence}
-            for evidence in prior_evidence:
-                if evidence.get("check_type") in current_types:
-                    continue
-                valid, reason = validate_prior_evidence(
-                    evidence,
-                    cluster_name=cluster_name,
-                    cluster_version=current_cluster_version,
-                    scope=namespace or "all-namespaces",
-                )
-                if valid:
-                    prior_evidence_reused.append(evidence)
-                    results[evidence["check_type"]] = evidence.get("result", {})
-                else:
-                    rejected_prior_evidence.append({"evidence_id": evidence.get("evidence_id"), "reason": reason})
-
-        if failed_checks and prior_evidence:
-            for failure in list(failed_checks):
-                matching = next((item for item in prior_evidence if item.get("check_type") == failure["check_type"]), None)
-                if matching and any(item.get("evidence_id") == matching.get("evidence_id") for item in prior_evidence_reused):
-                    failed_checks.remove(failure)
         if failed_checks:
             deep_check_errors.append("One or more mandatory checks were unavailable after one retry.")
     else:
@@ -1329,12 +1318,7 @@ def aks_validate_upgrade_readiness(
         "deep_check_errors": deep_check_errors,
         "assessment_status": assessment_status,
         "current_evidence": current_evidence,
-        "prior_evidence_reused": prior_evidence_reused,
-        "rejected_prior_evidence": rejected_prior_evidence,
         "failed_unavailable_checks": failed_checks,
-        "validity_decision": (
-            "Current evidence was used for checks collected in this run; prior evidence was reused only when all deterministic validity conditions passed."
-        ),
         "node_health": node_health,
         "pod_health": pod_health,
         "pdb_health": pdb_health,

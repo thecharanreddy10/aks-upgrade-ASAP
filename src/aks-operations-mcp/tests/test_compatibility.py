@@ -64,3 +64,26 @@ def test_upgrade_compatibility_falls_back_for_malformed_batch_section(monkeypatc
 
     assert result["query_errors"] == []
     assert result["crds"][0]["name"] == "widgets.example.com"
+
+
+def test_upgrade_compatibility_marks_query_warning_as_incomplete(monkeypatch):
+    empty_batch = {label: (0, '{"items":[]}') for label in (
+        "validating_webhooks", "mutating_webhooks", "apiservices", "crds",
+        "system_daemonsets", "system_deployments", "nodes",
+    )}
+    monkeypatch.setattr(compatibility, "run_kubectl_batch", lambda *_a, **_k: empty_batch)
+    monkeypatch.setattr(
+        compatibility,
+        "run_kubectl_json",
+        lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("fallback failed")),
+    )
+
+    # Force one fallback parse failure while retaining a warning finding.
+    malformed = dict(empty_batch)
+    malformed["crds"] = (0, '{"items":[bad]}')
+    monkeypatch.setattr(compatibility, "run_kubectl_batch", lambda *_a, **_k: malformed)
+
+    result = compatibility.aks_check_upgrade_compatibility(*ARGS)
+
+    assert result["query_errors"]
+    assert result["status"] == "INCOMPLETE"

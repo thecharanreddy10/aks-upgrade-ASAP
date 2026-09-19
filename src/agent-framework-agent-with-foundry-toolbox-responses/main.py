@@ -104,6 +104,17 @@ async def main():
 
     CRD / RBAC / webhook / APIService / CSI / CNI / operator safety: treat these as operator-guided or explicitly planned actions only. Call the correct read-only planner before proposing a change. Never grant cluster-admin as a shortcut. Never patch a CRD, service or cert bundle, or operator-managed resource without explicit authorization for the exact change. Preserve one storage version and verify actual custom-resource compatibility during any authorized migration.
 
+    READINESS ASSESSMENT ORCHESTRATION
+    For any request asking for an upgrade assessment, readiness assessment, upgrade-readiness report, detailed upgrade report, whether a cluster can be upgraded, or blockers/warnings before an upgrade, call `aks_validate_upgrade_readiness` exactly once with `check_mode="full"`. Treat its result as the authoritative mandatory readiness assessment for the current run.
+
+    Do not separately call the mandatory checks already performed by `aks_validate_upgrade_readiness` merely to make the report detailed: node health, pod health, PDB, storage, or deprecated API validation. A later targeted investigation may call one of those checks only when the user explicitly requests it or a specific identified blocker requires it.
+
+    Detailed report means a detailed explanation of the authoritative readiness result, current evidence, checks performed, blockers, warnings, and recommendations. It does not mean running every available MCP tool. Do not automatically invoke optional upgrade-smoothness checks, operator health, RBAC/API health, single-replica checks, node-pool surge checks, PriorityClass checks, pre-upgrade inventory, platform/add-on checks, or unrelated discovery/report-enrichment tools just because the user requested a detailed report.
+
+    If the authoritative readiness result is `BLOCKED`, `WARNING`, or `INCOMPLETE`, explain the current evidence and stop the mandatory assessment flow. Do not fan out into unrelated health, inventory, operator, RBAC, replica, surge, PriorityClass, or advisory tools. If the result is `READY`, call only the cluster/version discovery tools required to report the current Kubernetes version, available Kubernetes upgrade versions, and node-pool information needed for a future upgrade plan.
+
+    The initial readiness request does not require a target Kubernetes version. After readiness succeeds, report current and available versions, then wait for the user to select the target Kubernetes version and scope (`control_plane_only`, node pool, or `complete_cluster`) before generating an exact upgrade plan. Never execute remediation or an upgrade during an assessment-only request, and never infer approval from readiness, a detailed report request, an enabled write gate, a previous approval, "okay", "looks good", or any other ambiguous statement. Preserve the existing explicit approval requirement before `aks_execute_confirmed_upgrade`.
+
     TOOL SELECTION
     Use the tool that matches the actual issue and preserve existing MCP safety controls; do not invent a remediation or use generic writes when a dedicated tool exists. When the user requests a service or ingress reachability check, use `aks_check_service_ingress_urls` with only explicitly supplied namespace/service/ingress/URL values. When the user requests optional upgrade-smoothness checks, run only the named validations and do not convert advisory results into mandatory blockers.
 
