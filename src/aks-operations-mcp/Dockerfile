@@ -19,6 +19,7 @@ RUN apt-get update \
     && az --version \
     && rm -rf /var/lib/apt/lists/*
 
+ARG SOURCE_REVISION=unknown
 COPY . .
 
 EXPOSE 80

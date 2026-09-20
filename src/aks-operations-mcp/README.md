@@ -21,7 +21,12 @@ The Foundry Agent consumes this MCP server's tools through a Foundry Toolbox. To
 - `aks_check_pdb`
 - `aks_check_storage`
 - `aks_check_deprecated_apis`
+- `aks_check_single_replica_services`
+- `aks_check_operator_health`
+- `aks_check_node_pool_surge`
+- `aks_check_priority_class`
 - `aks_validate_upgrade_readiness`
+- `aks_plan_upgrade_preparation`
 - `aks_execute_confirmed_upgrade`
 - `aks_get_upgrade_execution_status`
 - `aks_upgrade_node_pool`
@@ -31,6 +36,12 @@ The Foundry Agent consumes this MCP server's tools through a Foundry Toolbox. To
 - `aks_remediate_storage`
 - `aks_remediate_deprecated_apis`
 - `aks_generate_deprecated_api_manifests`
+- `aks_rollback_pdb_remediation`
+- `aks_resolve_upgrade_issue`
+- `aks_kubectl_read`
+- `aks_kubectl_write`
+- `aks_az_read`
+- `aks_az_write`
 
 `aks_check_node_health`, `aks_check_pod_health`, `aks_check_pdb`, `aks_check_storage`, and `aks_check_deprecated_apis` back the **mandatory** upgrade-readiness checks. Optional/advisory upgrade-smoothness validations (single-replica services, operator health, node-pool surge, PriorityClass) are agent-side conversational checks layered on top of these tools and are never treated as automatic upgrade blockers.
 
@@ -119,4 +130,4 @@ These roles are wired in later phases through infrastructure.
 
 ## Validation
 
-At last repository validation: full test suite **277 passed**, focused async-upgrade suite **13 passed**. This MCP server was also validated deployed to Azure Container Apps (a specific revision responding to `tools/list` with HTTP 200 and exposing the required upgrade/status tools) — see the [root README's Validation / Test Results section](../../README.md#validation--test-results) for the point-in-time deployment snapshot and the real end-to-end live-cluster upgrade validation performed through this MCP server.
+At last repository validation, the full MCP test suite and focused registry/async tests passed. This MCP server is currently deployed to Azure Container Apps at revision `aks-mcp--0000058`; its `tools/list` endpoint responds with HTTP 200 and exposes 29 tools. See the [root README's Validation / Test Results section](../../README.md#validation--test-results) for the current deployment status and live-cluster validation context.

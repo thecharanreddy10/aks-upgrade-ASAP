@@ -5,8 +5,8 @@ hosted agent that consumes them: what works, how far each capability is implemen
 still missing, and the exact steps required to stand this up in a different Azure subscription
 (including which steps are already automated in code vs. which require a manual one-time action).
 
-Last verified against: MCP revision `aks-mcp--0000049`, Foundry toolbox `aks-agent-tools-v19`,
-agent version `35`.
+Last verified against: MCP revision `aks-mcp--0000058`, Foundry toolbox `aks-agent-tools-v19`,
+agent version `47`. The live MCP registry exposes 29 tools.
 
 ---
 
@@ -14,22 +14,11 @@ agent version `35`.
 
 ### 1.1 Read-only assessment / discovery — fully working
 - `aks_get_cluster_details`, `aks_get_node_pools`, `aks_get_available_upgrades`
-- `aks_collect_pre_upgrade_inventory` — cluster, node-pool, node, pod, PVC/PV, CRD, Helm,
-  kubectl client version, storage validation in one call.
 - `aks_check_node_health`, `aks_check_pod_health`, `aks_check_pdb`, `aks_check_storage`,
   `aks_check_deprecated_apis` — the five **mandatory** upgrade-readiness checks.
-- `aks_check_upgrade_compatibility` — webhooks, aggregated `APIService` availability, CRD
-  served/storage versions, `kube-system` DaemonSet/Deployment readiness, node OS/runtime.
-  Includes a single-query fallback for large/truncated batched JSON responses.
-- `aks_check_platform_addons` — CSI drivers/nodes, StorageClasses, Helm releases, Helm-managed
-  operator workloads. Same large-output fallback applied.
-- `aks_check_rbac_api_health` — unavailable aggregated APIs, RoleBinding/ClusterRoleBinding
-  counts, optional `kubectl auth can-i` checks for an explicit service account.
-- `aks_check_service_ingress_urls`, `aks_check_operator_health`,
+- `aks_check_operator_health`,
   `aks_check_single_replica_services`, `aks_check_node_pool_surge`, `aks_check_priority_class`
   — advisory/optional checks, never auto-run, never treated as blockers.
-- `aks_run_post_upgrade_smoke_checks` — per-stage (control_plane / node_pool / complete_cluster)
-  version + provisioning-state verification plus a full readiness re-check.
 
 ### 1.2 Upgrade execution — fully working, staged, non-blocking
 - `aks_plan_upgrade_preparation` — read-only plan; classifies each node pool as
@@ -56,31 +45,6 @@ agent version `35`.
 All write tools require `dry_run=False` **and** `check_mode="full"` **and**
 `AKS_REMEDIATION_ENABLE_WRITE=true` (or `AKS_UPGRADE_ENABLE_WRITE=true` for upgrade execution).
 
-### 1.4 Remediation — planning-only (no write tool exists yet)
-- `aks_plan_webhook_remediation` — identifies webhook service/endpoints/CA-bundle/candidate
-  Secrets; returns a plan; certificate rotation is not automated.
-- `aks_plan_platform_addon_remediation` — Helm/operator/CSI/CNI/add-on inventory + plan; no
-  upgrade is executed.
-- `aks_plan_crd_conversion` — served/storage versions, conversion webhook inspection, migration
-  plan; no CRD/CR write is executed.
-- `aks_resolve_upgrade_issue` / `aks_plan_upgrade_issue_remediation` — classifies a free-text
-  issue into `AUTOMATABLE` / `CONDITIONAL` / `OPERATOR_GUIDED` and dispatches to the matching
-  dry-run tool.
-
-### 1.5 RBAC remediation — the most complete "write" workflow built in this sprint
-- `aks_plan_rbac_remediation` — least-privilege Role/RoleBinding dry-run plan; rejects
-  `cluster-admin`/`admin`, wildcard resources, wildcard verbs.
-- `aks_apply_rbac_remediation` — applies **only** the exact planned Role + RoleBinding.
-  Requires `dry_run=False`, `check_mode="full"`, `AKS_REMEDIATION_ENABLE_WRITE=true`, **and**
-  `is_user_confirmed=True` (machine-verifiable confirmation gate, mirrors the upgrade executor's
-  pattern). Verifies every requested verb/resource pair individually plus both created objects;
-  reports `applied_unverified` (not a false `applied`) if the verification commands themselves
-  fail (e.g., no Kubernetes API context).
-- `aks_rollback_rbac_remediation` — removes exactly the created Role/RoleBinding; requires the
-  same write gate plus `confirm_destructive=True`.
-- **Live-validated**: applied `Role api-read` / `RoleBinding api-read-binding` in namespace
-  `phonebook` for service account `api`, granting only `get,list` on `pods`. Object existence
-  confirmed directly on the cluster.
 
 ---
 
@@ -111,9 +75,8 @@ only ever produce a read-only diagnosis and a list of manual steps for these:
 - Webhook certificate **rotation** (planning only — see §1.4)
 
 If you want any of these to become automatable, treat it as new work: add a dedicated,
-narrowly-scoped write tool following the same pattern as `aks_apply_rbac_remediation`
-(machine-verifiable `is_user_confirmed`, exact-scope validation, post-write verification,
-explicit rollback tool).
+narrowly-scoped write tool following the same pattern as the dedicated remediation tools
+(exact-scope validation, post-write verification, explicit rollback where applicable).
 
 ---
 
@@ -128,14 +91,6 @@ src/aks-operations-mcp/
     tools/registry.py                         # Single source of truth: ALL_TOOLS tuple exposed over MCP
     tools/upgrade.py                          # Inventory, readiness, staged-plan, smoke checks
     tools/async_upgrade.py                    # Non-blocking upgrade executor (aks_execute_confirmed_upgrade)
-    tools/compatibility.py                    # aks_check_upgrade_compatibility
-    tools/platform.py                         # aks_check_platform_addons
-    tools/rbac.py                             # aks_check_rbac_api_health
-    tools/remediate_rbac.py                   # RBAC plan/apply/rollback (the confirmed-write pattern)
-    tools/remediate_webhooks.py               # aks_plan_webhook_remediation
-    tools/remediate_platform.py               # aks_plan_platform_addon_remediation
-    tools/remediate_crds.py                   # aks_plan_crd_conversion
-    tools/resolve_upgrade_issue.py            # Free-text issue → capability classification
     tools/remediate_{pdb,pods,nodes,storage,deprecated_apis}.py  # existing dedicated write tools
     Dockerfile                                # MCP server container image
     tests/                                    # Full pytest suite (all green as of last run)

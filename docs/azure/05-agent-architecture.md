@@ -213,9 +213,9 @@ toolbox = FoundryToolbox(
 | Category | Count | Examples |
 |----------|-------|----------|
 | Discovery | 3 | aks_get_cluster_details, aks_get_node_pools, aks_get_available_upgrades |
-| Validation | 9 | aks_check_node_health, aks_check_pod_health, aks_check_pdb, aks_check_storage, aks_check_deprecated_apis, aks_validate_upgrade_readiness, aks_plan_upgrade_preparation, aks_check_single_replica_services, aks_check_operator_health, aks_check_node_pool_surge, aks_check_priority_class |
+| Validation | 11 | aks_check_node_health, aks_check_pod_health, aks_check_pdb, aks_check_storage, aks_check_deprecated_apis, aks_validate_upgrade_readiness, aks_plan_upgrade_preparation, aks_check_single_replica_services, aks_check_operator_health, aks_check_node_pool_surge, aks_check_priority_class |
 | Upgrade Execution | 3 | aks_execute_confirmed_upgrade, aks_get_upgrade_execution_status, aks_upgrade_node_pool |
-| Remediation | 9 | aks_remediate_pdb, aks_rollback_pdb_remediation, aks_remediate_pods, aks_remediate_node, aks_remediate_storage, aks_remediate_deprecated_apis, aks_generate_deprecated_api_manifests, aks_resolve_upgrade_issue |
+| Remediation | 8 | aks_remediate_pdb, aks_rollback_pdb_remediation, aks_remediate_pods, aks_remediate_node, aks_remediate_storage, aks_remediate_deprecated_apis, aks_generate_deprecated_api_manifests, aks_resolve_upgrade_issue |
 | CLI Operations | 4 | aks_kubectl_read, aks_kubectl_write, aks_az_read, aks_az_write |
 
 ### Agent Reasoning Loop

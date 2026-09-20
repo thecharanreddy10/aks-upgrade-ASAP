@@ -44,16 +44,17 @@ Target AKS Cluster
 **Agent**
 - Foundry hosted agent (source: [`src/agent-framework-agent-with-foundry-toolbox-responses`](src/agent-framework-agent-with-foundry-toolbox-responses))
 - Uses Foundry Toolbox for tool discovery
-- Deployed agent version during validation: **v14**
+- Current deployed agent version: **v47**
 
 **MCP**
 - AKS Operations MCP server (source: [`src/aks-operations-mcp`](src/aks-operations-mcp))
 - Hosted in Azure Container Apps
-- Validated revision during testing: **aks-mcp--0000030**
-- MCP endpoint (validated deployment snapshot): `https://aks-mcp.happyriver-781373bd.eastus2.azurecontainerapps.io/mcp`
+- Current deployed revision: **aks-mcp--0000058**
+- MCP endpoint: `https://aks-mcp.happyriver-781373bd.eastus2.azurecontainerapps.io/mcp`
+- Current MCP registry: **29 tools**
 - Exposes read-only assessment/discovery tools and explicit write/upgrade tools
 
-> The revision and endpoint above reflect a point-in-time validated deployment snapshot, not a guarantee of the current live deployment.
+> Deployment versions are point-in-time values and will change after future deployments.
 
 ## End-to-End Workflow
 
@@ -188,33 +189,35 @@ After a control-plane or node-pool stage reaches `Succeeded`, the agent verifies
 
 ## Deployment Architecture
 
-- **Agent:** Foundry hosted agent, connected to the configured Foundry Toolbox (`agent-tools`), using `FoundryChatClient` over the Responses protocol.
+- **Agent:** Foundry hosted agent, connected to Toolbox `aks-agent-tools-v19:1`, using `FoundryChatClient` over the Responses protocol.
 - **MCP:** AKS Operations MCP server hosted in Azure Container Apps, reached by the agent via the toolbox's MCP endpoint (`TOOLBOX_ENDPOINT`) or directly via `AKS_MCP_ENDPOINT`.
 
 The agent uses `FoundryChatClient` from the Agent Framework to create an OpenAI-compatible Responses client. It connects to the toolbox's MCP endpoint via `FoundryToolbox` â€” a thin convenience wrapper over `MCPStreamableHTTPTool` that authenticates every request with the credential and forwards the platform per-request call-id â€” which discovers and invokes the toolbox's tools over MCP at runtime. `FoundryToolbox` resolves the endpoint from the `TOOLBOX_ENDPOINT` environment variable. If that variable isn't set, it builds the endpoint from `FOUNDRY_PROJECT_ENDPOINT` and `TOOLBOX_NAME`.
 
 See [main.py](src/agent-framework-agent-with-foundry-toolbox-responses/main.py) for the full implementation.
 
-### Validated deployment snapshot
+### Current deployment snapshot
 
-The following reflects one point-in-time deployment validation and is not guaranteed to match the current live deployment:
+The current deployment is active and has been verified read-only:
 
-- Foundry agent **v14** was active and connected to the configured toolbox.
-- MCP Container App revision **aks-mcp--0000030** was healthy/running.
-- `tools/list` returned HTTP 200 and exposed the required upgrade/status tools.
-- The upgrade write gate (`AKS_UPGRADE_ENABLE_WRITE`) remained enabled during validation.
+- Foundry agent **v47** is active and connected to Toolbox `aks-agent-tools-v19:1`.
+- MCP Container App revision **aks-mcp--0000058** is healthy and running.
+- `tools/list` returns HTTP 200 and exposes **29 tools**.
+- The upgrade and remediation write gates remain controlled by MCP environment settings.
 
 ## Validation / Test Results
 
 Latest repository validation:
 
-- Full MCP suite: **277 passed**
-- Focused async suite: **13 passed**
+- Full MCP test suite: passed
+- Focused registry and async tests: passed
 - Agent `py_compile`: passed
 - Agent `compileall`: passed
 - `git diff --check`: passed
 
-These are automated unit/static checks. Live Azure upgrade tests described below were performed manually against a real cluster and are not part of the automated unit suite.
+These are automated unit/static checks. The live MCP deployment currently reports 29 tools, and the hosted agent is active on version 47 using Toolbox `aks-agent-tools-v19:1`.
+
+The live Azure upgrade tests described below were performed manually against a real cluster and are not part of the automated unit suite.
 
 ### Real end-to-end validation (live AKS cluster)
 
@@ -297,20 +300,22 @@ Follow the prompts to configure your Foundry project and model deployment. If yo
 > - [Toolbox reference](https://github.com/microsoft/GitHub-Copilot-for-Azure/blob/main/plugin/skills/microsoft-foundry/foundry-agent/create/references/toolbox-reference.md) â€” endpoint format, MCP protocol, OAuth consent handling, citation patterns, and troubleshooting.
 > - [Use toolbox in a hosted agent](https://github.com/microsoft/GitHub-Copilot-for-Azure/blob/main/plugin/skills/microsoft-foundry/foundry-agent/create/references/use-toolbox-in-hosted-agent.md) â€” endpoint resolution, env-var contract, payload shape, code integration patterns, and tracing.
 
-The agent reads the toolbox's MCP endpoint from `TOOLBOX_ENDPOINT`. Create the toolbox once from the bundled [`toolbox.yaml`](src/agent-framework-agent-with-foundry-toolbox-responses/toolbox.yaml):
+The agent reads the toolbox's MCP endpoint from `TOOLBOX_ENDPOINT`. This project uses the existing
+`aks-agent-tools-v19:1` Toolbox version. For a new environment, create a toolbox from the bundled
+[`toolbox.yaml`](src/agent-framework-agent-with-foundry-toolbox-responses/toolbox.yaml):
 
 ```bash
-azd ai toolbox create agent-tools --from-file ./toolbox.yaml --project-endpoint https://<account>.services.ai.azure.com/api/projects/<project>
+azd ai toolbox create aks-agent-tools --from-file ./src/agent-framework-agent-with-foundry-toolbox-responses/toolbox.yaml --project-endpoint https://<account>.services.ai.azure.com/api/projects/<project>
 ```
 
-The first version becomes the default automatically. Use `azd ai toolbox list`, `azd ai toolbox show agent-tools`, and `azd ai toolbox version list agent-tools` to inspect, and `azd ai toolbox delete agent-tools --force` to remove it.
+The first version becomes the default automatically. Use `azd ai toolbox list`, `azd ai toolbox show aks-agent-tools`, and `azd ai toolbox version list aks-agent-tools` to inspect, and `azd ai toolbox delete aks-agent-tools --force` to remove it.
 
-To stage incremental changes safely, use `azd ai toolbox connection add/remove` and `azd ai toolbox skill add/list/remove`; each creates a new toolbox version that carries forward existing connections and skills but **doesn't** change the default. Promote a version with `azd ai toolbox publish agent-tools <version>` when you're ready to make it active.
+To stage incremental changes safely, use `azd ai toolbox connection add/remove` and `azd ai toolbox skill add/list/remove`; each creates a new toolbox version that carries forward existing connections and skills but **doesn't** change the default. Promote a version with `azd ai toolbox publish aks-agent-tools <version>` when you're ready to make it active.
 
 `azd ai toolbox create` prints the toolbox's versioned MCP endpoint. Copy that endpoint and store it in your `azd` environment so the agent connects to it:
 
 ```bash
-azd env set TOOLBOX_ENDPOINT "https://<account>.services.ai.azure.com/api/projects/<project>/toolboxes/agent-tools/versions/1/mcp?api-version=v1"
+azd env set TOOLBOX_ENDPOINT "https://<account>.services.ai.azure.com/api/projects/<project>/toolboxes/aks-agent-tools/versions/1/mcp?api-version=v1"
 ```
 
 #### Provision Azure resources (if needed)
@@ -359,7 +364,7 @@ azd ai agent invoke "What tools do you have?"
 
 1. **VS Code** with the **[Foundry Toolkit](https://marketplace.visualstudio.com/items?itemName=ms-windows-ai-studio.windows-ai-studio)** extension installed.
 2. For debugging Python in VS Code, install the **[Python](https://marketplace.visualstudio.com/items?itemName=ms-python.python)** extension pack.
-3. The `agent-tools` toolbox must exist in your Foundry project. Create it from the bundled [`toolbox.yaml`](src/agent-framework-agent-with-foundry-toolbox-responses/toolbox.yaml) (`azd ai toolbox create agent-tools --from-file ./toolbox.yaml`) or in the Foundry portal before you run the agent.
+3. The `aks-agent-tools` toolbox must exist in your Foundry project. Create it from the bundled [`toolbox.yaml`](src/agent-framework-agent-with-foundry-toolbox-responses/toolbox.yaml) or in the Foundry portal before you run the agent.
 
 #### Set up the Python virtual environment
 
@@ -397,7 +402,7 @@ src/
     toolbox.yaml        # Toolbox definition pointing at the AKS Operations MCP endpoint
   aks-operations-mcp/                                     # AKS Operations MCP server
     tools/               # Discovery, validation, upgrade, and remediation tool implementations
-    tests/               # Automated test suite (277 passed at last validation)
+    tests/               # Automated MCP test suite
     function_app.py     # Azure Functions entrypoint for remote hosting
 ```
 
